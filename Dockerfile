@@ -24,4 +24,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Usamos gunicorn leyendo PORT
-CMD ["sh", "-c", "gunicorn -b 0.0.0.0:${PORT:-8080} app:app"]
+CMD ["sh", "-c", "gunicorn -b 0.0.0.0:${PORT:-8080} main:app"]
