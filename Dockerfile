@@ -1,32 +1,27 @@
 # Imagen base ligera y compatible con spaCy
 FROM python:3.10-slim
 
-# Evitar interrupciones
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1
 
-# Instalar dependencias del sistema necesarias para spaCy
+# Dependencias mínimas
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    libffi-dev \
-    libblas-dev \
-    liblapack-dev \
-    python3-dev \
+    gcc g++ libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Crear directorio de trabajo
 WORKDIR /app
 
-# Copiar requirements
 COPY requirements.txt .
 
-# Instalar paquetes Python
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && python -m spacy download es_core_news_lg
 
-# Descargar el modelo grande de spaCy
-RUN python -m spacy download es_core_news_lg
-
-# Copiar tu aplicación
 COPY . .
 
-CMD ["python", "main.py"]
+# Cloud Run espera que el contenedor escuche en $PORT (default 8080)
+ENV PORT=8080
+
+EXPOSE 8080
+
+# Usamos gunicorn leyendo PORT
+CMD ["sh", "-c", "gunicorn -b 0.0.0.0:${PORT:-8080} app:app"]
