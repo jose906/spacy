@@ -18,13 +18,13 @@ db_config = {
 }
 
 
-app.route('/spacy', methods=['POST'])
+@app.route('/spacy', methods=['GET'])
 def spacy():
     try:
         conexion = mysql.connector.connect(**db_config)
 
         if conexion.is_connected():
-            print("✅ Conexión exitosa a MySQL")
+            print("✅ Conexión exitosa a MySQL", flush=True)
 
             cursor = conexion.cursor(dictionary=True)
 
@@ -52,7 +52,7 @@ def spacy():
                 """
                 cursor.execute(select_sql)
             else:
-                print(f"ℹ️ Último tweet clasificado tiene created = {last_processed}")
+                print(f"ℹ️ Último tweet clasificado tiene created = {last_processed}", flush=True)
                 select_sql = """
                     SELECT tweetid, text
                     FROM Tweets
@@ -91,7 +91,7 @@ def spacy():
                     ))
 
                 conexion.commit()
-                print("✅ Entidades actualizadas correctamente.")
+                print("✅ Entidades actualizadas correctamente.",flush=True)
 
     except Error as e:
         print(f"❌ Error en la conexión o actualización: {e}")
@@ -124,3 +124,7 @@ def health():
             conn.close()
         except:
             pass
+
+if __name__ == "__main__":
+    # Para desarrollo local (no producción)
+    app.run(host="0.0.0.0", port=8080, debug=True)
