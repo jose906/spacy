@@ -4,17 +4,19 @@ from typing import List, Tuple
 from mysql.connector import Error
 from flask import Flask, jsonify
 from spacyscript import get_entities
+import os 
 
 app = Flask(__name__)
 
 
 db_config = {
-    "host": "34.69.57.221",      # o la IP de tu contenedor / Cloud SQL
-    "user": "admin",
-    "password": "Admin123!",
-    "database": "Analisis",
-    "port": 3306,
-    
+            # IP pública o nombre interno de Cloud SQL
+    "user": os.environ.get("DB_USER"),
+    "password": os.environ.get("DB_PASS"),
+    "database": os.environ.get("DB_NAME"),
+    "unix_socket": f"/cloudsql/{os.environ.get('INSTANCE_CONNECTION_NAME')}",
+    "charset": "utf8mb4",
+    "port": "3306",
 }
 
 
