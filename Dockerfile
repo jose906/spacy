@@ -14,7 +14,8 @@ WORKDIR /app
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt \
-    && python -m spacy download es_core_news_lg
+    && python -m spacy download es_core_news_lg \
+    && python -m nltk.downloader wordnet stopwords omw-1.4
 
 COPY . .
 
