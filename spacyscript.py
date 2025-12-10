@@ -24,20 +24,15 @@ def get_entities(text):
 
 
 def preprocess_text(text: str) -> str:
-    lemmatizer = WordNetLemmatizer()
+
     # Quitar caracteres no alfabéticos
     r = re.sub('[^a-zA-Z]', ' ', text)
     r = r.lower()
-    r = r.split()
-
-    # Quitar stopwords
-    r = [word for word in r if word not in stopwords.words('english')]
-
-    # Lemmatizar
-    r = [lemmatizer.lemmatize(word) for word in r]
+   
+    
 
     # Volver a string
-    return ' '.join(r)
+    return r
     
     
 
