@@ -26,15 +26,15 @@ def get_entities(text):
 def preprocess_text(text: str) -> str:
 
      # Eliminar URLs (http, https, www)
-    texto = re.sub(r'http\S+|www\S+', '', texto)
+    text = re.sub(r'http\S+|www\S+', '', text)
     
     # Eliminar hashtags (#palabra)
-    texto = re.sub(r'#\w+', '', texto)
+    text = re.sub(r'#\w+', '', text)
 
     # Quitar espacios extra
-    texto = re.sub(r'\s+', ' ', texto).strip()
+    text = re.sub(r'\s+', ' ', text).strip()
 
-    return texto
+    return text
     
 
     
