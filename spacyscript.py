@@ -24,7 +24,10 @@ def get_entities(text):
 
 
 def preprocess_text(text: str) -> str:
-
+    #eliminar menciones (@usuario)
+    text = re.sub(r'@\w+', '', text)
+    #eliminar lea
+    text = re.sub(r'lea', '', text, flags=re.IGNORECASE)
      # Eliminar URLs (http, https, www)
     text = re.sub(r'http\S+|www\S+', '', text)
     
