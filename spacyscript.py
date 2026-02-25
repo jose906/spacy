@@ -31,6 +31,12 @@ def preprocess_text(text: str) -> str:
      # Eliminar URLs (http, https, www)
     text = re.sub(r'http\S+|www\S+', '', text)
     
+    text = re.sub(r'RT', '', text, flags=re.IGNORECASE)
+    
+    text = re.sub(r'Brújula Digital', '', text, flags=re.IGNORECASE)
+    
+    
+
     # Eliminar hashtags (#palabra)
     text = re.sub(r'#\w+', '', text)
 
