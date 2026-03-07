@@ -69,6 +69,7 @@ def spacy():
                 print("✅ No hay nuevos tweets para clasificar.")
             else:
                 print(f"📄 Procesando {len(tweets)} tweets nuevos...")
+                a = 0
 
                 for t in tweets:
                     entidades = get_entities(t["text"])
@@ -91,6 +92,11 @@ def spacy():
                     cursor.execute(update_sql, (
                         lugar, persona, organizacion, locacion, otros, t["tweetid"]
                     ))
+                    a += 1
+                    if a % 100 == 0:
+                        print(f"✅ Procesados {a} tweets...")
+                        break
+                    
 
                 conexion.commit()
                 print("✅ Entidades actualizadas correctamente.",flush=True)
