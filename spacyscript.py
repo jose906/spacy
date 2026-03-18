@@ -36,6 +36,7 @@ def preprocess_text(text: str) -> str:
     text = re.sub(r'Brújula Digital', '', text, flags=re.IGNORECASE)
     
     text = re.sub(r'🟠 l', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'Lee', '',text,flags=re.IGNORECASE)
 
     # Eliminar hashtags (#palabra)
     text = re.sub(r'#\w+', '', text)
