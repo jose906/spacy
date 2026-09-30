@@ -174,7 +174,7 @@ def spacy_entities_v2():
             AND t.text IS NOT NULL
             AND TRIM(t.text) <> ''
             ORDER BY t.created ASC, t.tweetid ASC
-            LIMIT 100
+            LIMIT 50
         """
 
         cursor.execute(select_sql)
@@ -360,10 +360,23 @@ def spacy_entities_v2():
     finally:
 
         if cursor:
-            cursor.close()
+            try:
+                cursor.close()
+            except Exception as close_error:
+                print(
+                    f"⚠️ Error cerrando cursor: {close_error}",
+                    flush=True
+                )
 
-        if conexion and conexion.is_connected():
-            conexion.close()
+        if conexion:
+            try:
+                if conexion.is_connected():
+                    conexion.close()
+            except Exception as close_error:
+                print(
+                    f"⚠️ Error cerrando conexión: {close_error}",
+                    flush=True
+                )
 
         print("🔒 Conexión cerrada.", flush=True)
 if __name__ == "__main__":
