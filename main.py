@@ -211,6 +211,7 @@ def pruebas():
 
         if conexion:
             conexion.close()
+    return "ok", 200
 
 if __name__ == "__main__":
     # Para desarrollo local (no producción)
