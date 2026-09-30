@@ -7,6 +7,8 @@ from spacyscript import get_entities
 import os 
 from spacyscript import get_entities_detailed
 from entity_resolver import resolve_entity
+from entity_resolver import resolve_entity,should_resolve_entity
+
 
 app = Flask(__name__)
 
@@ -142,22 +144,37 @@ def spacy_entities_v2():
     cursor = None
 
     try:
+        # =====================================================
+        # 1. CONEXIÓN
+        # =====================================================
+
         conexion = mysql.connector.connect(**db_config)
+
         cursor = conexion.cursor(dictionary=True)
 
         print("✅ Conexión exitosa a MySQL", flush=True)
 
         # =====================================================
-        # 1. BUSCAR TWEETS QUE TODAVÍA NO ESTÁN EN tweet_entities
+        # 2. OBTENER TWEETS PENDIENTES
         # =====================================================
         #
         # IMPORTANTE:
-        # No usamos MAX(created).
+        # Este endpoint NO modifica:
         #
-        # Buscamos directamente tweets que todavía no tengan
-        # relaciones en tweet_entities.
+        # Tweets.Persona
+        # Tweets.Organizacion
+        # Tweets.Lugar
+        # Tweets.Locacion
+        # Tweets.Otros
         #
-        # LIMIT 100 para probar de forma controlada.
+        # Solamente trabaja con:
+        #
+        # entities
+        # entity_aliases
+        # tweet_entities
+        #
+        # Por ahora usamos LIMIT 20 para hacer pruebas
+        # controladas.
         # =====================================================
 
         select_sql = """
@@ -178,15 +195,26 @@ def spacy_entities_v2():
         """
 
         cursor.execute(select_sql)
+
         tweets = cursor.fetchall()
 
+        # =====================================================
+        # 3. SI NO HAY TWEETS
+        # =====================================================
+
         if not tweets:
-            print("✅ No hay tweets pendientes para entity resolver.", flush=True)
+
+            print(
+                "✅ No hay tweets pendientes para entity resolver.",
+                flush=True
+            )
 
             return jsonify({
                 "status": "completed",
                 "tweets_processed": 0,
                 "entities_detected": 0,
+                "entities_saved": 0,
+                "entities_discarded": 0,
                 "errors": 0
             }), 200
 
@@ -195,12 +223,22 @@ def spacy_entities_v2():
             flush=True
         )
 
+        # =====================================================
+        # 4. CONTADORES
+        # =====================================================
+
         tweets_processed = 0
+
         entities_detected = 0
+
+        entities_saved = 0
+
+        entities_discarded = 0
+
         errors = 0
 
         # =====================================================
-        # 2. PROCESAR TWEETS
+        # 5. PROCESAR TWEETS
         # =====================================================
 
         for tweet in tweets:
@@ -210,18 +248,62 @@ def spacy_entities_v2():
 
             try:
 
-                # ---------------------------------------------
-                # Ejecutar spaCy UNA sola vez
-                # ---------------------------------------------
+                print(
+                    "\n"
+                    + "=" * 100,
+                    flush=True
+                )
+
+                print(
+                    f"📝 Tweet: {tweetid}",
+                    flush=True
+                )
+
+                # =================================================
+                # 5.1 SPAcY
+                # =================================================
+                #
+                # Ejecutamos spaCy UNA sola vez.
+                #
+                # Devuelve:
+                #
+                # {
+                #   "PER": [...],
+                #   "ORG": [...],
+                #   "LOC": [...],
+                #   "MISC": [...]
+                # }
+                #
+                # =================================================
 
                 entidades = get_entities_detailed(text)
 
-                # ---------------------------------------------
-                # Limpiar relaciones anteriores de este tweet
+                tweet_entities_count = sum(
+                    len(lista)
+                    for lista in entidades.values()
+                )
+
+                entities_detected += tweet_entities_count
+
+                print(
+                    f"🔎 Entidades detectadas: "
+                    f"{tweet_entities_count}",
+                    flush=True
+                )
+
+                # =================================================
+                # 5.2 LIMPIAR RELACIONES ANTERIORES
+                # =================================================
                 #
-                # Esto hace que el procesamiento sea idempotente.
-                # NO elimina entities ni entity_aliases.
-                # ---------------------------------------------
+                # Esto permite reprocesar un tweet sin duplicar
+                # sus relaciones.
+                #
+                # NO elimina:
+                #
+                # entities
+                # entity_aliases
+                #
+                # =================================================
 
                 cursor.execute(
                     """
@@ -231,13 +313,34 @@ def spacy_entities_v2():
                     (tweetid,)
                 )
 
-                # ---------------------------------------------
-                # Resolver cada entidad
-                # ---------------------------------------------
+                # =================================================
+                # 5.3 RECORRER ENTIDADES
+                # =================================================
 
                 for label, lista in entidades.items():
 
                     for entity in lista:
+
+                        # =========================================
+                        # FILTRO DE CALIDAD
+                        # =========================================
+
+                        if not should_resolve_entity(entity):
+
+                            entities_discarded += 1
+
+                            print(
+                                f"⏭️ DESCARTADA | "
+                                f"{entity['text']} | "
+                                f"{entity['label']}",
+                                flush=True
+                            )
+
+                            continue
+
+                        # =========================================
+                        # RESOLVER ENTIDAD
+                        # =========================================
 
                         resultado = resolve_entity(
                             cursor,
@@ -246,9 +349,17 @@ def spacy_entities_v2():
 
                         entity_id = resultado["entity_id"]
 
-                        # -------------------------------------
-                        # Guardar relación tweet -> entidad
-                        # -------------------------------------
+                        resolution_source = resultado[
+                            "resolution_source"
+                        ]
+
+                        confidence = resultado[
+                            "confidence"
+                        ]
+
+                        # =========================================
+                        # GUARDAR RELACIÓN
+                        # =========================================
 
                         insert_sql = """
                             INSERT INTO tweet_entities (
@@ -285,67 +396,126 @@ def spacy_entities_v2():
                                 entity["start_char"],
                                 entity["end_char"],
                                 entity["detection_source"],
-                                resultado["resolution_source"],
-                                resultado["confidence"]
+                                resolution_source,
+                                confidence
                             )
                         )
 
-                        entities_detected += 1
+                        entities_saved += 1
 
-                # ---------------------------------------------
-                # COMMIT POR TWEET
+                        print(
+                            f"✅ GUARDADA | "
+                            f"{entity['text']} | "
+                            f"{entity['label']} | "
+                            f"entity_id={entity_id} | "
+                            f"source={resolution_source}",
+                            flush=True
+                        )
+
+                # =================================================
+                # 5.4 COMMIT DEL TWEET
+                # =================================================
                 #
-                # Para esta etapa de pruebas prefiero esto.
-                # Si un tweet falla, los anteriores quedan
-                # correctamente guardados.
-                # ---------------------------------------------
+                # Durante estas pruebas hacemos commit por tweet.
+                #
+                # Si el tweet siguiente falla, este queda
+                # correctamente guardado.
+                #
+                # =================================================
 
                 conexion.commit()
 
                 tweets_processed += 1
 
                 print(
-                    f"✅ Tweet {tweetid} | "
-                    f"entidades: "
-                    f"{sum(len(v) for v in entidades.values())}",
+                    f"✅ Tweet {tweetid} procesado.",
                     flush=True
                 )
 
             except Exception as tweet_error:
+
+                # =================================================
+                # SOLO REVERTIMOS EL TWEET ACTUAL
+                # =================================================
 
                 conexion.rollback()
 
                 errors += 1
 
                 print(
-                    f"❌ Error procesando tweet {tweetid}: "
+                    f"❌ ERROR tweet {tweetid}: "
                     f"{tweet_error}",
                     flush=True
                 )
 
+                # Continuamos con el siguiente tweet
+                continue
+
         # =====================================================
-        # 3. RESULTADO
+        # 6. RESULTADO FINAL
         # =====================================================
 
         print(
-            f"\n✅ TERMINADO | "
-            f"tweets={tweets_processed} | "
-            f"entidades={entities_detected} | "
-            f"errores={errors}",
+            "\n"
+            + "=" * 100,
             flush=True
         )
+
+        print(
+            "✅ PROCESAMIENTO TERMINADO",
+            flush=True
+        )
+
+        print(
+            f"Tweets procesados: {tweets_processed}",
+            flush=True
+        )
+
+        print(
+            f"Entidades detectadas: {entities_detected}",
+            flush=True
+        )
+
+        print(
+            f"Entidades guardadas: {entities_saved}",
+            flush=True
+        )
+
+        print(
+            f"Entidades descartadas: {entities_discarded}",
+            flush=True
+        )
+
+        print(
+            f"Errores: {errors}",
+            flush=True
+        )
+
+        # =====================================================
+        # 7. RESPONSE
+        # =====================================================
 
         return jsonify({
             "status": "completed",
             "tweets_processed": tweets_processed,
             "entities_detected": entities_detected,
+            "entities_saved": entities_saved,
+            "entities_discarded": entities_discarded,
             "errors": errors
         }), 200
 
     except Exception as e:
 
+        # =====================================================
+        # ERROR GENERAL
+        # =====================================================
+
         if conexion:
-            conexion.rollback()
+
+            try:
+                conexion.rollback()
+            except Exception:
+                pass
 
         print(
             f"❌ Error general en spacy_entities_v2: {e}",
@@ -359,26 +529,46 @@ def spacy_entities_v2():
 
     finally:
 
+        # =====================================================
+        # 8. CERRAR CURSOR DE FORMA SEGURA
+        # =====================================================
+
         if cursor:
+
             try:
                 cursor.close()
+
             except Exception as close_error:
+
                 print(
-                    f"⚠️ Error cerrando cursor: {close_error}",
+                    f"⚠️ Error cerrando cursor: "
+                    f"{close_error}",
                     flush=True
                 )
+
+        # =====================================================
+        # 9. CERRAR CONEXIÓN
+        # =====================================================
 
         if conexion:
+
             try:
+
                 if conexion.is_connected():
                     conexion.close()
+
             except Exception as close_error:
+
                 print(
-                    f"⚠️ Error cerrando conexión: {close_error}",
+                    f"⚠️ Error cerrando conexión: "
+                    f"{close_error}",
                     flush=True
                 )
 
-        print("🔒 Conexión cerrada.", flush=True)
+        print(
+            "🔒 Conexión cerrada.",
+            flush=True
+        )
 if __name__ == "__main__":
     # Para desarrollo local (no producción)
     app.run(host="0.0.0.0", port=8080, debug=True)

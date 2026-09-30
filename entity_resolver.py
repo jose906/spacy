@@ -1,6 +1,6 @@
 import re
 import unicodedata
-from entity_patterns import ENTITY_CATALOG
+from entity_patterns import ENTITY_CATALOG, ENTITY_STOPLIST,GENERIC_ENTITY_PHRASES
 
 
 def normalize_alias(text):
@@ -229,6 +229,119 @@ def resolve_entity(cursor, entity):
         "resolution_source": "new",
         "confidence": 1.0
     }
+    
+def should_resolve_entity(entity):
+    """
+    Decide si una entidad detectada por spaCy merece entrar
+    al sistema normalizado de entidades.
+
+    IMPORTANTE:
+    Esto NO modifica get_entities() ni el sistema legacy.
+    Solo protege entities/entity_aliases/tweet_entities.
+    """
+
+    if not entity:
+        return False
+
+    mention = entity.get("text")
+    entity_type = entity.get("label")
+    canonical_id = entity.get("canonical_id")
+
+    # -----------------------------------------------------
+    # 1. Validaciones básicas
+    # -----------------------------------------------------
+
+    if not mention or not isinstance(mention, str):
+        return False
+
+    mention = mention.strip()
+
+    if not mention:
+        return False
+
+    # -----------------------------------------------------
+    # 2. Las entidades conocidas del EntityRuler
+    #    tienen prioridad.
+    # -----------------------------------------------------
+
+    if canonical_id:
+        return True
+
+    # -----------------------------------------------------
+    # 3. Normalización
+    # -----------------------------------------------------
+
+    normalized = normalize_alias(mention)
+
+    if not normalized:
+        return False
+
+    # -----------------------------------------------------
+    # 4. Stoplist exacta
+    # -----------------------------------------------------
+
+    if normalized in ENTITY_STOPLIST:
+        return False
+
+    # -----------------------------------------------------
+    # 5. Frases genéricas
+    # -----------------------------------------------------
+
+    if normalized in GENERIC_ENTITY_PHRASES:
+        return False
+
+    # -----------------------------------------------------
+    # 6. Muy corto
+    #
+    # Evita cosas como:
+    # EL
+    # DE
+    # A
+    #
+    # PERO no bloqueamos siglas conocidas porque las
+    # entidades con canonical_id ya pasaron arriba.
+    # -----------------------------------------------------
+
+    compact = re.sub(r"[^a-z0-9]", "", normalized)
+
+    if len(compact) < 3:
+        return False
+
+    # -----------------------------------------------------
+    # 7. Debe contener al menos una letra
+    # -----------------------------------------------------
+
+    if not re.search(r"[a-z]", normalized):
+        return False
+
+    # -----------------------------------------------------
+    # 8. Frases excesivamente largas
+    #
+    # Normalmente indican que spaCy capturó parte de una
+    # oración o encabezado completo.
+    # -----------------------------------------------------
+
+    words = normalized.split()
+
+    if len(words) > 10:
+        return False
+
+    # -----------------------------------------------------
+    # 9. Basura editorial frecuente
+    # -----------------------------------------------------
+
+    editorial_patterns = [
+        r"^a primera hora\b",
+        r"^la informacion al instante\b",
+        r"^ultima hora\b",
+        r"^ultimo momento\b",
+    ]
+
+    for pattern in editorial_patterns:
+        if re.search(pattern, normalized):
+            return False
+
+    return True
 
 
 def _ensure_alias(

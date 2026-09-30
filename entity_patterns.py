@@ -18,6 +18,34 @@
 # ============================================================
 
 
+ENTITY_STOPLIST = {
+    "el",
+    "la",
+    "los",
+    "las",
+    "un",
+    "una",
+    "unos",
+    "unas",
+    "este",
+    "esta",
+    "esto",
+    "ese",
+    "esa",
+    "aquel",
+    "aquella",
+    "buenos dias",
+    "buenas tardes",
+    "buenas noches",
+}
+
+
+GENERIC_ENTITY_PHRASES = {
+    "el jefe de estado",
+    "jefe de estado",
+    "la informacion",
+    "informacion",
+}
 ENTITY_CATALOG = {
 
     # ========================================================
