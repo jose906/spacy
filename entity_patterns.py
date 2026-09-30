@@ -18,6 +18,159 @@
 # ============================================================
 
 
+ENTITY_CATALOG = {
+
+    # ========================================================
+    # MEDIOS
+    # ========================================================
+
+    "AGENCIA_NOTICIAS_FIDES": {
+        "name": "Agencia de Noticias Fides",
+        "type": "ORG"
+    },
+
+    "GRUPO_FIDES": {
+        "name": "Grupo Fides",
+        "type": "ORG"
+    },
+
+    # ========================================================
+    # ORGANIZACIONES EMPRESARIALES
+    # ========================================================
+
+    "CONFEDERACION_EMPRESARIOS_PRIVADOS_BOLIVIA": {
+        "name": "Confederación de Empresarios Privados de Bolivia",
+        "type": "ORG"
+    },
+
+    # ========================================================
+    # PARTIDOS
+    # ========================================================
+
+    "PARTIDO_DEMOCRATA_CRISTIANO": {
+        "name": "Partido Demócrata Cristiano",
+        "type": "ORG"
+    },
+
+    # ========================================================
+    # EMPRESAS / ENTIDADES ESTATALES
+    # ========================================================
+
+    "YPFB": {
+        "name": "Yacimientos Petrolíferos Fiscales Bolivianos",
+        "type": "ORG"
+    },
+
+    "BANCO_CENTRAL_BOLIVIA": {
+        "name": "Banco Central de Bolivia",
+        "type": "ORG"
+    },
+
+    # ========================================================
+    # ÓRGANO ELECTORAL
+    # ========================================================
+
+    "ORGANO_ELECTORAL_PLURINACIONAL": {
+        "name": "Órgano Electoral Plurinacional",
+        "type": "ORG"
+    },
+
+    "TRIBUNAL_SUPREMO_ELECTORAL": {
+        "name": "Tribunal Supremo Electoral",
+        "type": "ORG"
+    },
+
+    # ========================================================
+    # PODER LEGISLATIVO
+    # ========================================================
+
+    "ASAMBLEA_LEGISLATIVA_PLURINACIONAL": {
+        "name": "Asamblea Legislativa Plurinacional",
+        "type": "ORG"
+    },
+
+    "CAMARA_DIPUTADOS": {
+        "name": "Cámara de Diputados",
+        "type": "ORG"
+    },
+
+    "CAMARA_SENADORES": {
+        "name": "Cámara de Senadores",
+        "type": "ORG"
+    },
+
+    # ========================================================
+    # OTRAS ENTIDADES PÚBLICAS
+    # ========================================================
+
+    "ADMINISTRADORA_BOLIVIANA_CARRETERAS": {
+        "name": "Administradora Boliviana de Carreteras",
+        "type": "ORG"
+    },
+
+    "AGENCIA_NACIONAL_HIDROCARBUROS": {
+        "name": "Agencia Nacional de Hidrocarburos",
+        "type": "ORG"
+    },
+
+    "INSTITUTO_NACIONAL_ESTADISTICA": {
+        "name": "Instituto Nacional de Estadística",
+        "type": "ORG"
+    },
+
+    "SEGIP": {
+        "name": "SEGIP",
+        "type": "ORG"
+    },
+
+    "AGETIC": {
+        "name": "AGETIC",
+        "type": "ORG"
+    },
+
+    "ADUANA_NACIONAL": {
+        "name": "Aduana Nacional",
+        "type": "ORG"
+    },
+
+    "POLICIA_BOLIVIANA": {
+        "name": "Policía Boliviana",
+        "type": "ORG"
+    },
+
+    "FUERZAS_ARMADAS_BOLIVIA": {
+        "name": "Fuerzas Armadas",
+        "type": "ORG"
+    },
+
+    # ========================================================
+    # JUSTICIA
+    # ========================================================
+
+    "TRIBUNAL_CONSTITUCIONAL_PLURINACIONAL": {
+        "name": "Tribunal Constitucional Plurinacional",
+        "type": "ORG"
+    },
+
+    "TRIBUNAL_SUPREMO_JUSTICIA": {
+        "name": "Tribunal Supremo de Justicia",
+        "type": "ORG"
+    },
+
+    "FISCALIA_GENERAL_ESTADO": {
+        "name": "Fiscalía General del Estado",
+        "type": "ORG"
+    },
+
+    # ========================================================
+    # CONCEJOS
+    # ========================================================
+
+    "CONCEJO_MUNICIPAL": {
+        "name": "Concejo Municipal",
+        "type": "ORG"
+    }
+}
 ENTITY_PATTERNS = [
 
     # ========================================================

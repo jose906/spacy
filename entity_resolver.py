@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from entity_patterns import ENTITY_CATALOG
 
 
 def normalize_alias(text):
@@ -61,7 +62,7 @@ def resolve_entity(cursor, entity):
             SELECT id
             FROM entities
             WHERE external_key = %s
-              AND status = 'active'
+            AND status = 'active'
             LIMIT 1
             """,
             (canonical_id,)
@@ -69,10 +70,33 @@ def resolve_entity(cursor, entity):
 
         row = cursor.fetchone()
 
+        # =====================================================
+        # YA EXISTE
+        # =====================================================
+
         if row:
 
             entity_id = row["id"]
 
+            # Obtener nombre canónico desde el catálogo
+            catalog_entry = ENTITY_CATALOG.get(canonical_id)
+
+            if catalog_entry:
+                cursor.execute(
+                    """
+                    UPDATE entities
+                    SET canonical_name = %s,
+                        entity_type = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        catalog_entry["name"],
+                        catalog_entry["type"],
+                        entity_id
+                    )
+                )
+
+            # Registrar el alias si todavía no existe
             _ensure_alias(
                 cursor,
                 entity_id,
@@ -88,11 +112,18 @@ def resolve_entity(cursor, entity):
                 "confidence": 1.0
             }
 
-        # -----------------------------------------------------
-        # Primera vez que vemos esta entidad del EntityRuler
-        # -----------------------------------------------------
+        # =====================================================
+        # NO EXISTE -> CREAR ENTIDAD
+        # =====================================================
 
-        canonical_name = mention
+        catalog_entry = ENTITY_CATALOG.get(canonical_id)
+
+        if catalog_entry:
+            canonical_name = catalog_entry["name"]
+            canonical_type = catalog_entry["type"]
+        else:
+            canonical_name = mention
+            canonical_type = entity_type
 
         cursor.execute(
             """
@@ -105,13 +136,14 @@ def resolve_entity(cursor, entity):
             """,
             (
                 canonical_name,
-                entity_type,
+                canonical_type,
                 canonical_id
             )
         )
 
         entity_id = cursor.lastrowid
 
+        # Registrar el alias encontrado
         _ensure_alias(
             cursor,
             entity_id,
