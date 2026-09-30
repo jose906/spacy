@@ -174,7 +174,7 @@ def spacy_entities_v2():
             AND t.text IS NOT NULL
             AND TRIM(t.text) <> ''
             ORDER BY t.created ASC, t.tweetid ASC
-            LIMIT 50
+            LIMIT 20
         """
 
         cursor.execute(select_sql)
