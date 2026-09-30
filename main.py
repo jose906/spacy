@@ -5,6 +5,8 @@ from mysql.connector import Error
 from flask import Flask, jsonify
 from spacyscript import get_entities
 import os 
+from spacyscript import get_entities_detailed
+from entity_resolver import resolve_entity
 
 app = Flask(__name__)
 
@@ -132,6 +134,83 @@ def health():
             conn.close()
         except:
             pass
+        
+@app.route("/pruebas", methods=["GET"])
+def pruebas():
+   
+
+    textos = [
+        "YPFB anunció nuevas inversiones.",
+        "Yacimientos Petrolíferos Fiscales Bolivianos presentó su informe.",
+
+        "El TSE presentó el calendario electoral.",
+        "El Tribunal Supremo Electoral emitió una resolución.",
+
+        "Luis Arce participó de una reunión.",
+        "Luis Arce presentó un informe.",
+
+        "La reunión se realizó en La Paz.",
+        "El evento ocurrió en La Paz."
+    ]
+
+
+    conexion = None
+    cursor = None
+
+    try:
+
+        conexion = mysql.connector.connect(**db_config)
+
+        cursor = conexion.cursor(dictionary=True)
+
+        for texto in textos:
+
+            print("\n" + "=" * 100)
+            print("TEXTO:", texto)
+
+            entidades = get_entities_detailed(texto)
+
+            for label, lista in entidades.items():
+
+                for entity in lista:
+
+                    resultado = resolve_entity(
+                        cursor,
+                        entity
+                    )
+
+                    print(
+                        entity["text"],
+                        "|",
+                        label,
+                        "| canonical:",
+                        entity["canonical_id"],
+                        "| entity_id:",
+                        resultado["entity_id"],
+                        "| source:",
+                        resultado["resolution_source"]
+                    )
+
+        # IMPORTANTE:
+        # En esta prueba sí guardamos para poder revisar las tablas.
+        conexion.commit()
+
+        print("\n✅ PRUEBA TERMINADA")
+
+    except Exception as e:
+
+        if conexion:
+            conexion.rollback()
+
+        print("\n❌ ERROR:", e)
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        if conexion:
+            conexion.close()
 
 if __name__ == "__main__":
     # Para desarrollo local (no producción)
