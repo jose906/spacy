@@ -1,11 +1,9 @@
 # ============================================================
 # ENTITY PATTERNS - NETVORA
 # ============================================================
-#
 # Reglas complementarias para es_core_news_lg.
 #
 # Objetivos:
-#
 # 1. Corregir errores conocidos del NER.
 # 2. Reconocer instituciones bolivianas frecuentes.
 # 3. Reconocer familias institucionales mediante estructura.
@@ -14,31 +12,20 @@
 # IMPORTANTE:
 # No pretendemos reemplazar spaCy.
 # Estas reglas complementan el modelo estadístico.
-#
 # ============================================================
 
 
-ENTITY_STOPLIST = {
-    "el",
-    "la",
-    "los",
-    "las",
-    "un",
-    "una",
-    "unos",
-    "unas",
-    "este",
-    "esta",
-    "esto",
-    "ese",
-    "esa",
-    "aquel",
-    "aquella",
-    "buenos dias",
-    "buenas tardes",
-    "buenas noches",
-}
+# ============================================================
+# FILTROS DE CALIDAD
+# ============================================================
 
+ENTITY_STOPLIST = {
+    "el", "la", "los", "las",
+    "un", "una", "unos", "unas",
+    "este", "esta", "esto",
+    "ese", "esa", "aquel", "aquella",
+    "buenos dias", "buenas tardes", "buenas noches",
+}
 
 GENERIC_ENTITY_PHRASES = {
     "el jefe de estado",
@@ -46,454 +33,290 @@ GENERIC_ENTITY_PHRASES = {
     "la informacion",
     "informacion",
 }
-ENTITY_CATALOG = {
 
-    # ========================================================
+
+# ============================================================
+# ENTIDADES CONOCIDAS
+# ============================================================
+# Cada entidad se define UNA SOLA VEZ.
+#
+# key     -> external_key / canonical_id estable
+# name    -> nombre canónico para mostrar y guardar
+# type    -> PER / ORG / LOC / MISC
+# aliases -> formas que EntityRuler debe reconocer
+# ============================================================
+
+KNOWN_ENTITIES = {
+    # --------------------------------------------------------
+    # EMPRESAS / ORGANIZACIONES DETECTADAS EN DATOS REALES
+    # --------------------------------------------------------
+    "TOYOSA": {
+        "name": "Toyosa",
+        "type": "ORG",
+        "aliases": ["Toyosa"],
+    },
+    "ORGANO_JUDICIAL_BOLIVIA": {
+        "name": "Órgano Judicial",
+        "type": "ORG",
+        "aliases": ["Órgano Judicial"],
+    },
+    "CONFEDERACION_AGROPECUARIA_NACIONAL": {
+        "name": "Confederación Agropecuaria Nacional",
+        "type": "ORG",
+        "aliases": [
+            "CONFEAGRO",
+            "Confederación Agropecuaria Nacional",
+        ],
+    },
+
+    # --------------------------------------------------------
     # MEDIOS
-    # ========================================================
-
+    # --------------------------------------------------------
     "AGENCIA_NOTICIAS_FIDES": {
         "name": "Agencia de Noticias Fides",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "ANF",
+            "Agencia de Noticias Fides",
+        ],
     },
-
     "GRUPO_FIDES": {
         "name": "Grupo Fides",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "GrupoFides",
+            "Grupo Fides",
+        ],
     },
 
-    # ========================================================
+    # --------------------------------------------------------
     # ORGANIZACIONES EMPRESARIALES
-    # ========================================================
-
+    # --------------------------------------------------------
     "CONFEDERACION_EMPRESARIOS_PRIVADOS_BOLIVIA": {
         "name": "Confederación de Empresarios Privados de Bolivia",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "CEPB",
+            "Confederación de Empresarios Privados de Bolivia",
+        ],
     },
 
-    # ========================================================
+    # --------------------------------------------------------
     # PARTIDOS
-    # ========================================================
-
+    # --------------------------------------------------------
     "PARTIDO_DEMOCRATA_CRISTIANO": {
         "name": "Partido Demócrata Cristiano",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "PDC",
+            "Partido Demócrata Cristiano",
+        ],
     },
 
-    # ========================================================
+    # --------------------------------------------------------
     # EMPRESAS / ENTIDADES ESTATALES
-    # ========================================================
-
+    # --------------------------------------------------------
     "YPFB": {
         "name": "Yacimientos Petrolíferos Fiscales Bolivianos",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "YPFB",
+            "Yacimientos Petrolíferos Fiscales Bolivianos",
+        ],
     },
-
     "BANCO_CENTRAL_BOLIVIA": {
         "name": "Banco Central de Bolivia",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "BCB",
+            "Banco Central de Bolivia",
+        ],
     },
 
-    # ========================================================
+    # --------------------------------------------------------
     # ÓRGANO ELECTORAL
-    # ========================================================
-
+    # --------------------------------------------------------
     "ORGANO_ELECTORAL_PLURINACIONAL": {
         "name": "Órgano Electoral Plurinacional",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "OEP",
+            "Órgano Electoral Plurinacional",
+        ],
     },
-
     "TRIBUNAL_SUPREMO_ELECTORAL": {
         "name": "Tribunal Supremo Electoral",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "TSE",
+            "Tribunal Supremo Electoral",
+        ],
     },
 
-    # ========================================================
+    # --------------------------------------------------------
     # PODER LEGISLATIVO
-    # ========================================================
-
+    # --------------------------------------------------------
     "ASAMBLEA_LEGISLATIVA_PLURINACIONAL": {
         "name": "Asamblea Legislativa Plurinacional",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "ALP",
+            "Asamblea Legislativa Plurinacional",
+        ],
     },
-
     "CAMARA_DIPUTADOS": {
         "name": "Cámara de Diputados",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": ["Cámara de Diputados"],
     },
-
     "CAMARA_SENADORES": {
         "name": "Cámara de Senadores",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": ["Cámara de Senadores"],
     },
 
-    # ========================================================
+    # --------------------------------------------------------
     # OTRAS ENTIDADES PÚBLICAS
-    # ========================================================
-
+    # --------------------------------------------------------
     "ADMINISTRADORA_BOLIVIANA_CARRETERAS": {
         "name": "Administradora Boliviana de Carreteras",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "ABC",
+            "Administradora Boliviana de Carreteras",
+        ],
     },
-
     "AGENCIA_NACIONAL_HIDROCARBUROS": {
         "name": "Agencia Nacional de Hidrocarburos",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "ANH",
+            "Agencia Nacional de Hidrocarburos",
+        ],
     },
-
     "INSTITUTO_NACIONAL_ESTADISTICA": {
         "name": "Instituto Nacional de Estadística",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "INE",
+            "Instituto Nacional de Estadística",
+        ],
     },
-
     "SEGIP": {
         "name": "SEGIP",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": ["SEGIP"],
     },
-
     "AGETIC": {
         "name": "AGETIC",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": ["AGETIC"],
     },
-
     "ADUANA_NACIONAL": {
         "name": "Aduana Nacional",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": ["Aduana Nacional"],
     },
-
     "POLICIA_BOLIVIANA": {
         "name": "Policía Boliviana",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": ["Policía Boliviana"],
     },
-
     "FUERZAS_ARMADAS_BOLIVIA": {
         "name": "Fuerzas Armadas",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": ["Fuerzas Armadas"],
     },
 
-    # ========================================================
+    # --------------------------------------------------------
     # JUSTICIA
-    # ========================================================
-
+    # --------------------------------------------------------
     "TRIBUNAL_CONSTITUCIONAL_PLURINACIONAL": {
         "name": "Tribunal Constitucional Plurinacional",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "TCP",
+            "Tribunal Constitucional Plurinacional",
+        ],
     },
-
     "TRIBUNAL_SUPREMO_JUSTICIA": {
         "name": "Tribunal Supremo de Justicia",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": [
+            "TSJ",
+            "Tribunal Supremo de Justicia",
+        ],
     },
-
     "FISCALIA_GENERAL_ESTADO": {
         "name": "Fiscalía General del Estado",
-        "type": "ORG"
+        "type": "ORG",
+        "aliases": ["Fiscalía General del Estado"],
     },
 
-    # ========================================================
+    # --------------------------------------------------------
     # CONCEJOS
-    # ========================================================
-
+    # --------------------------------------------------------
     "CONCEJO_MUNICIPAL": {
         "name": "Concejo Municipal",
-        "type": "ORG"
-    }
+        "type": "ORG",
+        "aliases": ["Concejo Municipal"],
+    },
 }
-ENTITY_PATTERNS = [
-
-    # ========================================================
-    # MEDIOS / ORGANIZACIONES CONOCIDAS
-    # ========================================================
-
-    {
-        "label": "ORG",
-        "pattern": "ANF",
-        "id": "AGENCIA_NOTICIAS_FIDES"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Agencia de Noticias Fides",
-        "id": "AGENCIA_NOTICIAS_FIDES"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "GrupoFides",
-        "id": "GRUPO_FIDES"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Grupo Fides",
-        "id": "GRUPO_FIDES"
-    },
 
 
-    # ========================================================
-    # ORGANIZACIONES EMPRESARIALES
-    # ========================================================
+# ============================================================
+# CATÁLOGO CANÓNICO
+# ============================================================
+# Mantiene compatibilidad con entity_resolver.py:
+#
+# from entity_patterns import ENTITY_CATALOG
+# ============================================================
 
-    {
-        "label": "ORG",
-        "pattern": "CEPB",
-        "id": "CONFEDERACION_EMPRESARIOS_PRIVADOS_BOLIVIA"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Confederación de Empresarios Privados de Bolivia",
-        "id": "CONFEDERACION_EMPRESARIOS_PRIVADOS_BOLIVIA"
-    },
-
-
-    # ========================================================
-    # PARTIDOS
-    # ========================================================
-
-    {
-        "label": "ORG",
-        "pattern": "PDC",
-        "id": "PARTIDO_DEMOCRATA_CRISTIANO"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Partido Demócrata Cristiano",
-        "id": "PARTIDO_DEMOCRATA_CRISTIANO"
-    },
+ENTITY_CATALOG = {
+    external_key: {
+        "name": data["name"],
+        "type": data["type"],
+    }
+    for external_key, data in KNOWN_ENTITIES.items()
+}
 
 
-    # ========================================================
-    # EMPRESAS / ENTIDADES ESTATALES
-    # ========================================================
+# ============================================================
+# PATTERNS DE ENTIDADES CONOCIDAS
+# ============================================================
+# Se generan automáticamente desde KNOWN_ENTITIES.
+# Cada alias recibe el mismo external_key mediante "id".
+# ============================================================
 
-    # YPFB
+KNOWN_ENTITY_PATTERNS = []
 
-    {
-        "label": "ORG",
-        "pattern": "YPFB",
-        "id": "YPFB"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Yacimientos Petrolíferos Fiscales Bolivianos",
-        "id": "YPFB"
-    },
-
-
-    # ========================================================
-    # BANCO CENTRAL
-    # ========================================================
-
-    {
-        "label": "ORG",
-        "pattern": "BCB",
-        "id": "BANCO_CENTRAL_BOLIVIA"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Banco Central de Bolivia",
-        "id": "BANCO_CENTRAL_BOLIVIA"
-    },
+for external_key, data in KNOWN_ENTITIES.items():
+    for alias in data.get("aliases", []):
+        KNOWN_ENTITY_PATTERNS.append({
+            "label": data["type"],
+            "pattern": alias,
+            "id": external_key,
+        })
 
 
-    # ========================================================
-    # ÓRGANO ELECTORAL
-    # ========================================================
+# ============================================================
+# PATRONES ESTRUCTURALES
+# ============================================================
+# Estos NO reciben "id".
+#
+# No representan una organización concreta del catálogo.
+# Solamente indican que una estructura lingüística suele
+# representar una organización.
+#
+# IMPORTANTE:
+# Nunca poner un id genérico como MINISTERIO o UNIVERSIDAD,
+# porque eso fusionaría organizaciones diferentes.
+# ============================================================
 
-    {
-        "label": "ORG",
-        "pattern": "OEP",
-        "id": "ORGANO_ELECTORAL_PLURINACIONAL"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Órgano Electoral Plurinacional",
-        "id": "ORGANO_ELECTORAL_PLURINACIONAL"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "TSE",
-        "id": "TRIBUNAL_SUPREMO_ELECTORAL"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Tribunal Supremo Electoral",
-        "id": "TRIBUNAL_SUPREMO_ELECTORAL"
-    },
-
-
-    # ========================================================
-    # PODER LEGISLATIVO
-    # ========================================================
-
-    {
-        "label": "ORG",
-        "pattern": "ALP",
-        "id": "ASAMBLEA_LEGISLATIVA_PLURINACIONAL"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Asamblea Legislativa Plurinacional",
-        "id": "ASAMBLEA_LEGISLATIVA_PLURINACIONAL"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Cámara de Diputados",
-        "id": "CAMARA_DIPUTADOS"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Cámara de Senadores",
-        "id": "CAMARA_SENADORES"
-    },
-
-
-    # ========================================================
-    # OTRAS ENTIDADES PÚBLICAS MUY FRECUENTES
-    # ========================================================
-
-    {
-        "label": "ORG",
-        "pattern": "ABC",
-        "id": "ADMINISTRADORA_BOLIVIANA_CARRETERAS"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Administradora Boliviana de Carreteras",
-        "id": "ADMINISTRADORA_BOLIVIANA_CARRETERAS"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "ANH",
-        "id": "AGENCIA_NACIONAL_HIDROCARBUROS"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Agencia Nacional de Hidrocarburos",
-        "id": "AGENCIA_NACIONAL_HIDROCARBUROS"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "INE",
-        "id": "INSTITUTO_NACIONAL_ESTADISTICA"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Instituto Nacional de Estadística",
-        "id": "INSTITUTO_NACIONAL_ESTADISTICA"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "SEGIP",
-        "id": "SEGIP"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "AGETIC",
-        "id": "AGETIC"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Aduana Nacional",
-        "id": "ADUANA_NACIONAL"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Policía Boliviana",
-        "id": "POLICIA_BOLIVIANA"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Fuerzas Armadas",
-        "id": "FUERZAS_ARMADAS_BOLIVIA"
-    },
-
-
-    # ========================================================
-    # JUSTICIA
-    # ========================================================
-
-    {
-        "label": "ORG",
-        "pattern": "TCP",
-        "id": "TRIBUNAL_CONSTITUCIONAL_PLURINACIONAL"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Tribunal Constitucional Plurinacional",
-        "id": "TRIBUNAL_CONSTITUCIONAL_PLURINACIONAL"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "TSJ",
-        "id": "TRIBUNAL_SUPREMO_JUSTICIA"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Tribunal Supremo de Justicia",
-        "id": "TRIBUNAL_SUPREMO_JUSTICIA"
-    },
-
-    {
-        "label": "ORG",
-        "pattern": "Fiscalía General del Estado",
-        "id": "FISCALIA_GENERAL_ESTADO"
-    },
-
-
-    # ========================================================
-    # CONCEJOS
-    # ========================================================
-
-    {
-        "label": "ORG",
-        "pattern": "Concejo Municipal",
-        "id": "CONCEJO_MUNICIPAL"
-    },
-
-
-    # ========================================================
-    # PATRONES ESTRUCTURALES
-    # ========================================================
-    #
-    # A partir de aquí no estamos diciendo:
-    #
-    # "esta organización concreta existe en nuestro catálogo"
-    #
-    # sino:
-    #
-    # "esta estructura lingüística suele representar ORG".
-    #
-    # ========================================================
-
-
-    # ========================================================
+STRUCTURAL_PATTERNS = [
+    # --------------------------------------------------------
     # MINISTERIOS
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
@@ -501,24 +324,16 @@ ENTITY_PATTERNS = [
             {"LOWER": "de"},
             {
                 "POS": {
-                    "IN": [
-                        "NOUN",
-                        "PROPN",
-                        "ADJ",
-                        "ADP",
-                        "CCONJ"
-                    ]
+                    "IN": ["NOUN", "PROPN", "ADJ", "ADP", "CCONJ"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # VICEMINISTERIOS
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
@@ -526,49 +341,32 @@ ENTITY_PATTERNS = [
             {"LOWER": "de"},
             {
                 "POS": {
-                    "IN": [
-                        "NOUN",
-                        "PROPN",
-                        "ADJ",
-                        "ADP",
-                        "CCONJ"
-                    ]
+                    "IN": ["NOUN", "PROPN", "ADJ", "ADP", "CCONJ"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # UNIVERSIDADES
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
             {"LOWER": "universidad"},
             {
                 "POS": {
-                    "IN": [
-                        "PROPN",
-                        "ADJ",
-                        "NOUN",
-                        "ADP",
-                        "DET",
-                        "CCONJ"
-                    ]
+                    "IN": ["PROPN", "ADJ", "NOUN", "ADP", "DET", "CCONJ"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # GOBIERNOS AUTÓNOMOS MUNICIPALES
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
@@ -578,22 +376,16 @@ ENTITY_PATTERNS = [
             {"LOWER": "de"},
             {
                 "POS": {
-                    "IN": [
-                        "PROPN",
-                        "ADP",
-                        "DET"
-                    ]
+                    "IN": ["PROPN", "ADP", "DET"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # GOBIERNOS AUTÓNOMOS DEPARTAMENTALES
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
@@ -603,22 +395,16 @@ ENTITY_PATTERNS = [
             {"LOWER": "de"},
             {
                 "POS": {
-                    "IN": [
-                        "PROPN",
-                        "ADP",
-                        "DET"
-                    ]
+                    "IN": ["PROPN", "ADP", "DET"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # ASAMBLEAS LEGISLATIVAS DEPARTAMENTALES
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
@@ -628,22 +414,16 @@ ENTITY_PATTERNS = [
             {"LOWER": "de"},
             {
                 "POS": {
-                    "IN": [
-                        "PROPN",
-                        "ADP",
-                        "DET"
-                    ]
+                    "IN": ["PROPN", "ADP", "DET"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # TRIBUNALES ELECTORALES DEPARTAMENTALES
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
@@ -653,102 +433,64 @@ ENTITY_PATTERNS = [
             {"LOWER": "de"},
             {
                 "POS": {
-                    "IN": [
-                        "PROPN",
-                        "ADP",
-                        "DET"
-                    ]
+                    "IN": ["PROPN", "ADP", "DET"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # FEDERACIONES
-    # ========================================================
-    #
-    # Conservador: exigimos que empiece por Federación y
-    # dejamos que spaCy determine componentes nominales.
-    #
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
             {"LOWER": "federación"},
             {
                 "POS": {
-                    "IN": [
-                        "PROPN",
-                        "NOUN",
-                        "ADJ",
-                        "ADP",
-                        "DET",
-                        "CCONJ"
-                    ]
+                    "IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET", "CCONJ"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # CONFEDERACIONES
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
             {"LOWER": "confederación"},
             {
                 "POS": {
-                    "IN": [
-                        "PROPN",
-                        "NOUN",
-                        "ADJ",
-                        "ADP",
-                        "DET",
-                        "CCONJ"
-                    ]
+                    "IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET", "CCONJ"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # CÁMARAS EMPRESARIALES / INSTITUCIONALES
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
             {"LOWER": "cámara"},
             {
                 "POS": {
-                    "IN": [
-                        "PROPN",
-                        "NOUN",
-                        "ADJ",
-                        "ADP",
-                        "DET",
-                        "CCONJ"
-                    ]
+                    "IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET", "CCONJ"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # INSTITUTOS NACIONALES
-    # ========================================================
-
+    # --------------------------------------------------------
     {
         "label": "ORG",
         "pattern": [
@@ -756,18 +498,23 @@ ENTITY_PATTERNS = [
             {"LOWER": "nacional"},
             {
                 "POS": {
-                    "IN": [
-                        "PROPN",
-                        "NOUN",
-                        "ADJ",
-                        "ADP",
-                        "DET",
-                        "CCONJ"
-                    ]
+                    "IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET", "CCONJ"]
                 },
-                "OP": "+"
-            }
-        ]
+                "OP": "+",
+            },
+        ],
     },
-
 ]
+
+
+# ============================================================
+# EXPORT FINAL PARA SPACY
+# ============================================================
+# spacyscript.py puede seguir usando exactamente:
+#
+# from entity_patterns import ENTITY_PATTERNS
+#
+# ruler.add_patterns(ENTITY_PATTERNS)
+# ============================================================
+
+ENTITY_PATTERNS = KNOWN_ENTITY_PATTERNS + STRUCTURAL_PATTERNS
