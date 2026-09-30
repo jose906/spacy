@@ -266,6 +266,19 @@ def should_resolve_entity(entity):
 
     if canonical_id:
         return True
+    # -----------------------------------------------------
+    # MISC detectado solamente por el NER
+    # -----------------------------------------------------
+    #
+    # MISC es una categoría demasiado abierta en spaCy.
+    # No la guardamos automáticamente salvo que haya sido
+    # reconocida explícitamente por EntityRuler.
+    #
+    # PER / ORG / LOC continúan funcionando normalmente.
+# -----------------------------------------------------
+
+    if entity_type == "MISC":
+        return False
 
     # -----------------------------------------------------
     # 3. Normalización
