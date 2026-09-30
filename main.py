@@ -286,8 +286,12 @@ def spacy_entities_v2():
                 entities_detected += tweet_entities_count
 
                 print(
-                    f"🔎 Entidades detectadas: "
-                    f"{tweet_entities_count}",
+                    f"🔎 Tweet {tweetid} | "
+                    f"Entidades detectadas: {tweet_entities_count} | "
+                    f"PER={len(entidades.get('PER', []))} | "
+                    f"ORG={len(entidades.get('ORG', []))} | "
+                    f"LOC={len(entidades.get('LOC', []))} | "
+                    f"MISC={len(entidades.get('MISC', []))}",
                     flush=True
                 )
 
