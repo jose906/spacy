@@ -518,3 +518,4 @@ STRUCTURAL_PATTERNS = [
 # ============================================================
 
 ENTITY_PATTERNS = KNOWN_ENTITY_PATTERNS + STRUCTURAL_PATTERNS
+

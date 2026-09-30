@@ -139,56 +139,18 @@ def health():
         
 @app.route("/prueba",methods=["GET"])
 def prueba():
+    from spacyscript import nlp
 
-    tests = [
-        # Canonicalización
-        "YPFB informó sobre nuevas inversiones.",
-        "Yacimientos Petrolíferos Fiscales Bolivianos informó sobre nuevas inversiones.",
+    texto = "La Confederación Agropecuaria Nacional anunció nuevas medidas."
 
-        "El TSE publicó el comunicado.",
-        "El Tribunal Supremo Electoral publicó el comunicado.",
+    doc = nlp(texto)
 
-        "La ANH realizó una inspección.",
-        "La Agencia Nacional de Hidrocarburos realizó una inspección.",
-
-        "ANF informó sobre el hecho.",
-        "Agencia de Noticias Fides informó sobre el hecho.",
-
-        # Nuevos
-        "Toyosa presentó nuevos vehículos.",
-        "El Órgano Judicial emitió un comunicado.",
-        "CONFEAGRO anunció nuevas medidas.",
-        "La Confederación Agropecuaria Nacional anunció nuevas medidas.",
-
-        # NER normal
-        "Rodrigo Paz llegó a La Paz.",
-
-        # Estructurales
-        "El Ministerio de Economía presentó el informe.",
-        "La Universidad Mayor de San Andrés realizó el evento.",
-        "El Gobierno Autónomo Municipal de Santa Cruz de la Sierra informó sobre las obras.",
-    ]
-
-
-    for i, text in enumerate(tests, 1):
-
-        print("\n" + "=" * 80)
-        print(f"TEST {i}")
-        print(text)
-
-        entities = get_entities_detailed(text)
-
-        for entity_type, values in entities.items():
-            for entity in values:
-                print(
-                    f"{entity['text']} | "
-                    f"{entity['label']} | "
-                    f"canonical={entity['canonical_id']} | "
-                    f"source={entity['detection_source']}"
-                )
-                
-    return "ok"
-        
+    for ent in doc.ents:
+        print(
+            "TEXT:", ent.text,
+            "| LABEL:", ent.label_,
+            "| ENT_ID:", ent.ent_id_
+        )
 @app.route("/spacy_entities_v2", methods=["GET"])
 def spacy_entities_v2():
 
