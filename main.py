@@ -137,7 +137,7 @@ def health():
         except:
             pass
         
-@app.route("prueba",methods=["GET"])
+@app.route("/prueba",methods=["GET"])
 def prueba():
 
     tests = [
