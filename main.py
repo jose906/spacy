@@ -149,8 +149,9 @@ def prueba():
         print(
             "TEXT:", ent.text,
             "| LABEL:", ent.label_,
-            "| ENT_ID:", ent.ent_id_
-        )
+            "| ENT_ID:", ent.ent_id_, flush=True)
+    return "ok"
+    
 @app.route("/spacy_entities_v2", methods=["GET"])
 def spacy_entities_v2():
 
