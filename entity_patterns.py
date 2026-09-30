@@ -459,18 +459,7 @@ STRUCTURAL_PATTERNS = [
     # --------------------------------------------------------
     # CONFEDERACIONES
     # --------------------------------------------------------
-    {
-        "label": "ORG",
-        "pattern": [
-            {"LOWER": "confederación"},
-            {
-                "POS": {
-                    "IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET", "CCONJ"]
-                },
-                "OP": "+",
-            },
-        ],
-    },
+    
 
     # --------------------------------------------------------
     # CÁMARAS EMPRESARIALES / INSTITUCIONALES

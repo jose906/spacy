@@ -420,3 +420,13 @@ def debug_entities(text):
         "final": get_entities(text)
     }
     
+texto = "La Confederación Agropecuaria Nacional anunció nuevas medidas."
+
+doc = nlp(texto)
+
+for ent in doc.ents:
+        print(
+            "TEXT:", ent.text,
+            "| LABEL:", ent.label_,
+            "| ENT_ID:", ent.ent_id_, flush=True)
+    
