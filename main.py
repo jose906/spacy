@@ -160,6 +160,8 @@ def prueba():
 
         print("RESULTADO:")
         print(resultado)
+        print("RESULTADO RAW:", repr(resultado))
+        print("TIPO:", type(resultado))
 
     finally:
 
