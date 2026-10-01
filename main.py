@@ -139,18 +139,37 @@ def health():
         
 @app.route("/prueba",methods=["GET"])
 def prueba():
-    from spacyscript import nlp
 
-    texto = "La Confederación Agropecuaria Nacional anunció nuevas medidas."
 
-    doc = nlp(texto)
+    conexion = mysql.connector.connect(**db_config)
+    cursor = conexion.cursor(dictionary=True)
 
-    for ent in doc.ents:
-        print(
-            "TEXT:", ent.text,
-            "| LABEL:", ent.label_,
-            "| ENT_ID:", ent.ent_id_, flush=True)
-    return "ok"
+    try:
+
+        entity = {
+            "text": "CONFEAGRO",
+            "label": "ORG",
+            "canonical_id": None,
+            "detection_source": "ner",
+        }
+
+        resultado = resolve_entity(
+            cursor,
+            entity
+        )
+
+        print("RESULTADO:")
+        print(resultado)
+
+    finally:
+
+        # IMPORTANTE:
+        # esta prueba no debe guardar ningún cambio accidental
+        conexion.rollback()
+
+        cursor.close()
+        conexion.close()
+    return jsonify({"status": "completed"}), 200
     
 @app.route("/spacy_entities_v2", methods=["GET"])
 def spacy_entities_v2():
@@ -159,6 +178,7 @@ def spacy_entities_v2():
     cursor = None
 
     try:
+
         # =====================================================
         # 1. CONEXIÓN
         # =====================================================
@@ -316,7 +336,10 @@ def spacy_entities_v2():
                         # FILTRO DE CALIDAD
                         # =========================================
 
-                        if not should_resolve_entity(entity):
+                        if not should_resolve_entity(
+                            entity,
+                            text=text
+                        ):
 
                             entities_discarded += 1
                             tweet_discarded += 1
@@ -340,10 +363,41 @@ def spacy_entities_v2():
                             entity
                         )
 
+                        # =========================================
+                        # ENTIDAD AMBIGUA
+                        # =========================================
+                        #
+                        # resolve_entity() puede retornar None
+                        # cuando encuentra más de una entidad
+                        # activa para el mismo alias normalizado.
+                        #
+                        # En ese caso NO creamos otra entidad,
+                        # NO guardamos tweet_entities y
+                        # continuamos procesando el tweet.
+                        # =========================================
+
+                        if resultado is None:
+
+                            entities_discarded += 1
+                            tweet_discarded += 1
+
+                            print(
+                                f"⚠️ Tweet {tweetid} | "
+                                f"AMBIGUA | "
+                                f"{entity['text']} | "
+                                f"{entity['label']} | "
+                                f"no se pudo resolver de forma segura",
+                                flush=True
+                            )
+
+                            continue
+
                         entity_id = resultado["entity_id"]
+
                         resolution_source = resultado[
                             "resolution_source"
                         ]
+
                         confidence = resultado["confidence"]
 
                         # =========================================
@@ -407,8 +461,6 @@ def spacy_entities_v2():
                 # 5.4 MARCAR TWEET COMO PROCESADO
                 # =================================================
                 #
-                # MUY IMPORTANTE:
-                #
                 # Llegamos aquí solamente si todo el procesamiento
                 # del tweet terminó sin excepciones.
                 #
@@ -416,6 +468,7 @@ def spacy_entities_v2():
                 #
                 # entidades detectadas = 0
                 #
+                # o todas fueron descartadas/ambiguas,
                 # el tweet queda procesado.
                 # =================================================
 

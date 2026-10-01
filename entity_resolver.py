@@ -194,6 +194,8 @@ def resolve_entity(cursor, entity):
             "resolution_source": "exact_alias",
             "confidence": 1.0
         }
+    if len(rows) > 1:
+        return None
 
     # =========================================================
     # 3. ENTIDAD NUEVA
@@ -230,7 +232,7 @@ def resolve_entity(cursor, entity):
         "confidence": 1.0
     }
     
-def should_resolve_entity(entity):
+def should_resolve_entity(entity, text=None):
     """
     Decide si una entidad detectada por spaCy merece entrar
     al sistema normalizado de entidades.
@@ -266,19 +268,11 @@ def should_resolve_entity(entity):
 
     if canonical_id:
         return True
-    # -----------------------------------------------------
-    # MISC detectado solamente por el NER
-    # -----------------------------------------------------
-    #
-    # MISC es una categoría demasiado abierta en spaCy.
-    # No la guardamos automáticamente salvo que haya sido
-    # reconocida explícitamente por EntityRuler.
-    #
-    # PER / ORG / LOC continúan funcionando normalmente.
-# -----------------------------------------------------
 
-    if entity_type == "MISC":
-        return False
+    detection_source = entity.get("detection_source", "ner")
+
+    if text is not None and not isinstance(text, str):
+        text = None
 
     # -----------------------------------------------------
     # 3. Normalización
@@ -290,26 +284,149 @@ def should_resolve_entity(entity):
         return False
 
     # -----------------------------------------------------
-    # 4. Stoplist exacta
+    # 4. Siglas técnicas / infraestructura
+    # -----------------------------------------------------
+    #
+    # spaCy puede confundir ciertas siglas técnicas con
+    # ubicaciones u organizaciones.
+    #
+    # Ejemplo:
+    #   PTAR -> LOC
+    #
+    # PTAR se utiliza en nuestro dataset para referirse a
+    # Planta de Tratamiento de Aguas Residuales / proyectos
+    # de infraestructura, no a una organización o ubicación.
+    #
+    # Solo bloqueamos detecciones provenientes del NER.
+    # Una entidad explícitamente conocida por EntityRuler
+    # ya habría sido aceptada mediante canonical_id.
+    # -----------------------------------------------------
+
+    if detection_source == "ner":
+        technical_acronyms = {
+            "ptar",
+        }
+
+        if normalized in technical_acronyms:
+            return False
+
+    # -----------------------------------------------------
+    # 5. MISC detectado solamente por el NER
+    # -----------------------------------------------------
+    #
+    # MISC es una categoría demasiado abierta en spaCy.
+    # No la guardamos automáticamente salvo que haya sido
+    # reconocida explícitamente por EntityRuler.
+    #
+    # Las entidades conocidas con canonical_id ya fueron
+    # aceptadas anteriormente.
+    #
+    # PER / ORG / LOC continúan funcionando normalmente.
+    # -----------------------------------------------------
+
+    if entity_type == "MISC":
+        return False
+
+    # -----------------------------------------------------
+    # 6. Contexto: saludos confundidos con ubicaciones
+    # -----------------------------------------------------
+    #
+    # spaCy puede interpretar:
+    #
+    #   "Buenos días" -> "Buenos" | LOC
+    #
+    # No bloqueamos "Buenos" globalmente porque queremos
+    # evitar reglas ciegas basadas únicamente en la entidad.
+    # Solo se descarta cuando el contexto confirma un saludo.
+    # -----------------------------------------------------
+
+    if entity_type == "LOC" and text:
+
+        normalized_text = normalize_alias(text)
+
+        greeting_patterns = [
+            r"\bbuenos dias\b",
+            r"\bbuenas tardes\b",
+            r"\bbuenas noches\b",
+        ]
+
+        for pattern in greeting_patterns:
+            if re.search(pattern, normalized_text):
+                if normalized in {"buenos", "buenas"}:
+                    return False
+
+    # -----------------------------------------------------
+    # 7. Contexto: alertas confundidas con organizaciones
+    # -----------------------------------------------------
+    #
+    # Ejemplos:
+    #
+    #   Alerta Naranja Hidrológica
+    #   Alerta Roja Meteorológica
+    #
+    # Son avisos/estados de alerta, no organizaciones.
+    #
+    # Solo bloqueamos detecciones del NER.
+    # Las entidades conocidas del EntityRuler ya fueron
+    # aceptadas anteriormente mediante canonical_id.
+    # -----------------------------------------------------
+
+    if entity_type == "ORG" and detection_source == "ner":
+
+        if re.search(r"^alerta\b", normalized):
+            return False
+
+    # -----------------------------------------------------
+    # 8. Ubicaciones coordinadas sospechosas
+    # -----------------------------------------------------
+    #
+    # spaCy ocasionalmente fusiona dos nombres propios:
+    #
+    #   "Ramos y Arce" -> LOC
+    #
+    # Una ubicación real puede contener "y", por lo que
+    # NO bloqueamos cualquier LOC con conjunción.
+    #
+    # Solo rechazamos el patrón especialmente sospechoso:
+    # dos bloques cortos con apariencia de nombres propios
+    # unidos por "y/e".
+    # -----------------------------------------------------
+
+    if entity_type in {"PER", "LOC"} and detection_source == "ner":
+
+        coordinated_name = re.fullmatch(
+            r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]+\s+(?:y|e)\s+"
+            r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]+",
+            mention,
+            flags=re.IGNORECASE
+        )
+
+        if coordinated_name:
+            return False
+
+    # -----------------------------------------------------
+    # 9. Stoplist exacta
     # -----------------------------------------------------
 
     if normalized in ENTITY_STOPLIST:
         return False
 
     # -----------------------------------------------------
-    # 5. Frases genéricas
+    # 10. Frases genéricas
     # -----------------------------------------------------
 
     if normalized in GENERIC_ENTITY_PHRASES:
         return False
 
     # -----------------------------------------------------
-    # 6. Muy corto
+    # 11. Muy corto
+    # -----------------------------------------------------
     #
     # Evita cosas como:
-    # EL
-    # DE
-    # A
+    #
+    #   EL
+    #   DE
+    #   A
     #
     # PERO no bloqueamos siglas conocidas porque las
     # entidades con canonical_id ya pasaron arriba.
@@ -321,14 +438,15 @@ def should_resolve_entity(entity):
         return False
 
     # -----------------------------------------------------
-    # 7. Debe contener al menos una letra
+    # 12. Debe contener al menos una letra
     # -----------------------------------------------------
 
     if not re.search(r"[a-z]", normalized):
         return False
 
     # -----------------------------------------------------
-    # 8. Frases excesivamente largas
+    # 13. Frases excesivamente largas
+    # -----------------------------------------------------
     #
     # Normalmente indican que spaCy capturó parte de una
     # oración o encabezado completo.
@@ -340,7 +458,7 @@ def should_resolve_entity(entity):
         return False
 
     # -----------------------------------------------------
-    # 9. Basura editorial frecuente
+    # 14. Basura editorial frecuente
     # -----------------------------------------------------
 
     editorial_patterns = [
@@ -353,6 +471,10 @@ def should_resolve_entity(entity):
     for pattern in editorial_patterns:
         if re.search(pattern, normalized):
             return False
+
+    # -----------------------------------------------------
+    # 15. Entidad aceptada
+    # -----------------------------------------------------
 
     return True
 

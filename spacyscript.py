@@ -15,6 +15,49 @@ ruler = nlp.add_pipe(
 )
 
 ruler.add_patterns(ENTITY_PATTERNS)
+def split_camel_case(value):
+    """
+    Separa palabras CamelCase/PascalCase sin afectar siglas.
+
+    Ejemplos:
+        LuisArce         -> Luis Arce
+        TheStrongest     -> The Strongest
+        MarcasLaRazon    -> Marcas La Razon
+        BoliviaVerifica  -> Bolivia Verifica
+
+        YPFB             -> YPFB
+        SENAMHI          -> SENAMHI
+    """
+    if not value:
+        return value
+
+    # No separar siglas completamente en mayúsculas
+    if value.isupper():
+        return value
+
+    value = re.sub(
+        r'(?<=[a-záéíóúüñ])(?=[A-ZÁÉÍÓÚÜÑ])',
+        ' ',
+        value
+    )
+
+    return value
+
+def replace_hashtag(match):
+    hashtag = match.group(1)
+    hashtag = split_camel_case(hashtag)
+    return hashtag + ". "
+
+def replace_mention(match):
+    username = match.group(1)
+
+    # Separar CamelCase/PascalCase
+    username = split_camel_case(username)
+
+    # Aislar la mención para evitar que se una
+    # artificialmente con el texto siguiente
+    return username + ". "
+
 
 def preprocess_text(text: str) -> str:
     """
@@ -70,10 +113,11 @@ def preprocess_text(text: str) -> str:
     
 
     text = re.sub(
-        r'(?<!\w)@([A-Za-z0-9_]+)',
-        r'\1',
-        text
+    r'@([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)',
+    replace_mention,
+    text
     )
+
 
     # --------------------------------------------------------
     # HASHTAGS
@@ -86,11 +130,25 @@ def preprocess_text(text: str) -> str:
     # Eso lo podemos agregar posteriormente.
     #
 
+    # ---------------------------------------------------------
+    # HASHTAGS
+    # Conservamos el contenido semántico del hashtag,
+    # pero lo aislamos para evitar que varios hashtags
+    # consecutivos formen una entidad artificial.
+    #
+    # Ejemplo:
+    #   "#TheStrongest #Bolívar"
+    #       -> "TheStrongest. Bolívar."
+    #
+    # En lugar de:
+    #   "TheStrongest Bolívar"
+    # ---------------------------------------------------------
     text = re.sub(
-        r'#([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)',
-        r'\1',
-        text
-    )
+    r'#([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)',
+    replace_hashtag,
+    text
+)
+    
     text = re.sub(r'\s*[|│]\s*', '. ', text)
 
     # --------------------------------------------------------
@@ -419,4 +477,42 @@ def debug_entities(text):
         "spacy_raw": raw_entities,
         "final": get_entities(text)
     }
-    
+
+
+
+
+from entity_resolver import should_resolve_entity
+
+tests = [
+    {
+        "text": "Luis Arce",
+        "label": "PER",
+        "canonical_id": None,
+        "detection_source": "ner",
+    },
+    {
+        "text": "COB",
+        "label": "ORG",
+        "canonical_id": "COB",
+        "detection_source": "ruler",
+    },
+    {
+        "text": "PTAR",
+        "label": "LOC",
+        "canonical_id": None,
+        "detection_source": "ner",
+    },
+    {
+        "text": "Ramos y Arce",
+        "label": "PER",
+        "canonical_id": None,
+        "detection_source": "ner",
+    },
+]
+
+for entity in tests:
+    print(
+        entity["text"],
+        "=>",
+        should_resolve_entity(entity)
+    )
