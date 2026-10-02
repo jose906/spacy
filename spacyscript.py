@@ -1,484 +1,318 @@
+# -*- coding: utf-8 -*-
+"""Extracción NER de NetVora.
+
+Conserva la interfaz legacy ``get_entities(text)`` y agrega una salida detallada
+más una salida filtrada para el resolver normalizado.
+Compatible con Python 3.8+ y spaCy 3.x.
+"""
+
+import os
 import re
 import unicodedata
-from entity_resolver import should_resolve_entity
+
 import spacy
-from entity_patterns import ENTITY_PATTERNS
+from spacy.matcher import Matcher
 
-nlp = spacy.load("es_core_news_lg")
+from entity_patterns import KNOWN_ENTITY_PATTERNS, STRUCTURAL_PATTERNS
+from entity_resolver import should_resolve_entity
 
-ruler = nlp.add_pipe(
-    "entity_ruler",
-    after="ner",
-    config={
-        "overwrite_ents": True,
-        "phrase_matcher_attr": "LOWER"
-    }
-)
 
-ruler.add_patterns(ENTITY_PATTERNS)
+MODEL_NAME = os.environ.get("NETVORA_SPACY_MODEL", "es_core_news_lg")
+
+
+def _build_nlp(model_name=MODEL_NAME):
+    try:
+        nlp_obj = spacy.load(model_name)
+    except OSError as exc:
+        # Solo para tests locales controlados. En producción NO degradamos
+        # silenciosamente a un modelo vacío.
+        if os.environ.get("NETVORA_ALLOW_BLANK_SPACY") == "1":
+            nlp_obj = spacy.blank("es")
+        else:
+            raise RuntimeError(
+                "No se pudo cargar %s. Instala un modelo español compatible "
+                "con tu versión de spaCy (por ejemplo con: python -m spacy "
+                "download es_core_news_lg)." % model_name
+            ) from exc
+
+    # 1) Reglas estructurales: corrigen errores del NER en estructuras muy
+    # específicas. Se ejecutan después del NER y pueden reemplazar solapes.
+    structural_kwargs = {}
+    if "ner" in nlp_obj.pipe_names:
+        structural_kwargs["after"] = "ner"
+
+    structural_ruler = nlp_obj.add_pipe(
+        "entity_ruler",
+        name="netvora_structural_ruler",
+        config={"overwrite_ents": True, "validate": True},
+        **structural_kwargs
+    )
+    structural_ruler.add_patterns(STRUCTURAL_PATTERNS)
+
+    # 2) Catálogo conocido al final: si una regla exacta coincide, gana sobre
+    # NER y sobre reglas estructurales, y conserva ent_id_ canónico.
+    known_ruler = nlp_obj.add_pipe(
+        "entity_ruler",
+        name="netvora_known_ruler",
+        after="netvora_structural_ruler",
+        config={
+            "overwrite_ents": True,
+            "phrase_matcher_attr": "LOWER",
+            "validate": True,
+        },
+    )
+    known_ruler.add_patterns(KNOWN_ENTITY_PATTERNS)
+    return nlp_obj
+
+
+def _build_structural_matcher(nlp_obj):
+    """Matcher paralelo usado solo para identificar la fuente de un span."""
+    matcher = Matcher(nlp_obj.vocab, validate=True)
+    labels = {}
+    for index, item in enumerate(STRUCTURAL_PATTERNS):
+        rule_name = "NETVORA_STRUCT_%s_%d" % (item["label"], index)
+        matcher.add(rule_name, [item["pattern"]])
+        labels[nlp_obj.vocab.strings[rule_name]] = item["label"]
+    return matcher, labels
+
+
+nlp = _build_nlp()
+_STRUCTURAL_MATCHER, _STRUCTURAL_LABELS = _build_structural_matcher(nlp)
+
+
 def split_camel_case(value):
-    """
-    Separa palabras CamelCase/PascalCase sin afectar siglas.
-
-    Ejemplos:
-        LuisArce         -> Luis Arce
-        TheStrongest     -> The Strongest
-        MarcasLaRazon    -> Marcas La Razon
-        BoliviaVerifica  -> Bolivia Verifica
-
-        YPFB             -> YPFB
-        SENAMHI          -> SENAMHI
-    """
+    """Separa CamelCase/PascalCase y guiones bajos sin romper siglas."""
     if not value:
         return value
 
-    # No separar siglas completamente en mayúsculas
-    if value.isupper():
-        return value
+    value = re.sub(r"_+", " ", value)
 
+    # BoliviaVerifica -> Bolivia Verifica
     value = re.sub(
-        r'(?<=[a-záéíóúüñ])(?=[A-ZÁÉÍÓÚÜÑ])',
-        ' ',
-        value
+        r"(?<=[a-záéíóúüñ0-9])(?=[A-ZÁÉÍÓÚÜÑ])",
+        " ",
+        value,
     )
+    # ATBDigital -> ATB Digital; YPFB queda intacto.
+    value = re.sub(
+        r"(?<=[A-ZÁÉÍÓÚÜÑ])(?=[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ])",
+        " ",
+        value,
+    )
+    return re.sub(r"\s+", " ", value).strip()
 
-    return value
 
 def replace_hashtag(match):
-    hashtag = match.group(1)
-    hashtag = split_camel_case(hashtag)
-    return hashtag + ". "
+    return split_camel_case(match.group(1)) + ". "
+
 
 def replace_mention(match):
-    username = match.group(1)
-
-    # Separar CamelCase/PascalCase
-    username = split_camel_case(username)
-
-    # Aislar la mención para evitar que se una
-    # artificialmente con el texto siguiente
-    return username + ". "
+    return split_camel_case(match.group(1)) + ". "
 
 
-def preprocess_text(text: str) -> str:
-    """
-    Limpieza conservadora para NER.
-
-    El objetivo NO es transformar demasiado el texto,
-    sino eliminar ruido manteniendo el contexto que spaCy
-    necesita para reconocer personas, organizaciones y lugares.
-    """
-
+def preprocess_text(text):
+    """Limpieza conservadora que mantiene el contexto útil para NER."""
     if not isinstance(text, str) or not text.strip():
         return ""
 
-    # --------------------------------------------------------
-    # Unicode
-    # --------------------------------------------------------
-
     text = unicodedata.normalize("NFKC", text)
-    # Eliminar variation selectors Unicode que pueden quedar
-    # después de emojis y pegarse al siguiente token.
-    text = text.replace("\ufe0f", "")
-    text = text.replace("\ufe0e", "")
-
-    # Caracteres invisibles frecuentes
-    text = text.replace("\u200b", " ")
-    text = text.replace("\ufeff", " ")
-    text = text.replace("\u2060", " ")
+    for invisible in ("\ufe0f", "\ufe0e", "\u200b", "\ufeff", "\u2060"):
+        text = text.replace(invisible, " ")
     text = text.replace("\xa0", " ")
+    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
 
-    # Saltos de línea / tabs
-    text = text.replace("\n", " ")
-    text = text.replace("\r", " ")
-    text = text.replace("\t", " ")
+    # RT aislado, con dos puntos opcionales.
+    text = re.sub(r"(?i)(?<!\w)RT(?!\w)\s*:?\s*", " ", text)
 
-    # --------------------------------------------------------
-    # RT
-    # --------------------------------------------------------
+    # URLs completas o www.*
+    text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)
 
-    # Elimina RT como token, pero conserva el resto del texto.
+    # Conservamos semántica de mentions/hashtags, pero los aislamos con punto.
     text = re.sub(
-        r'(?i)(?<!\w)RT(?!\w)\s*:?',
-        ' ',
-        text
-    )
-
-    # --------------------------------------------------------
-    # URLs
-    # --------------------------------------------------------
-
-    text = re.sub(
-        r'https?://\S+|www\.\S+',
-        ' ',
+        r"@([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)",
+        replace_mention,
         text,
-        flags=re.IGNORECASE
+    )
+    text = re.sub(
+        r"#([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)",
+        replace_hashtag,
+        text,
     )
 
-    
+    # Separadores editoriales.
+    text = re.sub(r"\s*[|│]\s*", ". ", text)
 
-    text = re.sub(
-    r'@([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)',
-    replace_mention,
-    text
+    patterns_remove = (
+        r"(?i)\blea\s+m[aá]s\b\s*:?\s*",
+        r"(?i)\blee\s+m[aá]s\b\s*:?\s*",
+        r"(?i)\bm[aá]s\s+informaci[oó]n\b\s*:?\s*",
     )
-
-
-    # --------------------------------------------------------
-    # HASHTAGS
-    # --------------------------------------------------------
-    #
-    # #Bolivia -> Bolivia
-    # #SantaCruz -> SantaCruz
-    #
-    # NO intentamos todavía separar CamelCase.
-    # Eso lo podemos agregar posteriormente.
-    #
-
-    # ---------------------------------------------------------
-    # HASHTAGS
-    # Conservamos el contenido semántico del hashtag,
-    # pero lo aislamos para evitar que varios hashtags
-    # consecutivos formen una entidad artificial.
-    #
-    # Ejemplo:
-    #   "#TheStrongest #Bolívar"
-    #       -> "TheStrongest. Bolívar."
-    #
-    # En lugar de:
-    #   "TheStrongest Bolívar"
-    # ---------------------------------------------------------
-    text = re.sub(
-    r'#([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)',
-    replace_hashtag,
-    text
-)
-    
-    text = re.sub(r'\s*[|│]\s*', '. ', text)
-
-    # --------------------------------------------------------
-    # FRASES DE DISTRIBUCIÓN / CTA
-    # --------------------------------------------------------
-    #
-    # Mantener esta lista MUY conservadora.
-    #
-
-    patterns_remove = [
-        r'(?i)\blea\s+m[aá]s\b\s*:?',
-        r'(?i)\blee\s+m[aá]s\b\s*:?',
-        r'(?i)\bm[aá]s\s+informaci[oó]n\b\s*:?',
-    ]
-
     for pattern in patterns_remove:
-        text = re.sub(pattern, ' ', text)
-
-    # --------------------------------------------------------
-    # SÍMBOLOS DECORATIVOS
-    # --------------------------------------------------------
+        text = re.sub(pattern, " ", text)
 
     text = re.sub(
-    r'[★☆◆◉▪🔴🔵🟢🟡🟠🟣🟤⚫⚪'
-    r'🟥🟦🟩🟨🟧🟪'
-    r'✅✔✳🔹🔸▶🔻🔺📷📹🎥]+',
-    ' ',
-    text
-)
-
-    # --------------------------------------------------------
-    # COMILLAS
-    # --------------------------------------------------------
-
-    text = text.replace('“', '"')
-    text = text.replace('”', '"')
-    text = text.replace("‘", "'")
-    text = text.replace("’", "'")
-    text = text.replace("…", "...")
-
-    # --------------------------------------------------------
-    # PUNTUACIÓN REPETIDA
-    # --------------------------------------------------------
-
-    text = re.sub(
-        r'([!?.,:;])\1{2,}',
-        r'\1',
-        text
+        r"[★☆◆◉▪🔴🔵🟢🟡🟠🟣🟤⚫⚪🟥🟦🟩🟨🟧🟪✅✔✳🔹🔸▶🔻🔺📷📹🎥]+",
+        " ",
+        text,
     )
 
-    # --------------------------------------------------------
-    # ESPACIOS
-    # --------------------------------------------------------
+    text = (
+        text.replace("“", '"')
+        .replace("”", '"')
+        .replace("‘", "'")
+        .replace("’", "'")
+        .replace("…", "...")
+    )
+    text = re.sub(r"([!?.,:;])\1{2,}", r"\1", text)
+    return re.sub(r"\s+", " ", text).strip()
 
-    text = re.sub(r'\s+', ' ', text).strip()
 
-    return text
-# ============================================================
-# 3. NORMALIZAR ENTIDAD
-# ============================================================
-
-def normalize_entity(ent_text: str) -> str:
-    """
-    Limpia únicamente los bordes de una entidad.
-
-    IMPORTANTE:
-    No convertimos a minúsculas porque queremos conservar
-    el nombre tal como aparece.
-    """
-
-    if not ent_text:
+def normalize_entity(ent_text):
+    """Limpia bordes sin destruir la grafía original de la entidad."""
+    if not isinstance(ent_text, str) or not ent_text:
         return ""
 
-    entity = unicodedata.normalize("NFKC", ent_text)
-
-    entity = entity.strip()
-
-    # Eliminar puntuación problemática solamente de los extremos.
-    entity = re.sub(
-        r'^[\s,;:!?."\'()\[\]{}\-–—]+',
-        '',
-        entity
-    )
-
-    entity = re.sub(
-        r'[\s,;:!?."\'()\[\]{}\-–—]+$',
-        '',
-        entity
-    )
-
-    # Espacios repetidos
-    entity = re.sub(r'\s+', ' ', entity)
-
+    entity = unicodedata.normalize("NFKC", ent_text).strip()
+    entity = entity.strip(" \t\r\n,;:!? .\"'()[]{}<>-–—")
+    entity = re.sub(r"\s+", " ", entity)
     return entity.strip()
 
 
-# ============================================================
-# 4. VALIDAR ENTIDAD
-# ============================================================
-
-def is_valid_entity(ent_text: str, label: str = None) -> bool:
-
-    if not ent_text:
+def is_valid_entity(ent_text, label=None):
+    if not isinstance(ent_text, str) or not ent_text:
         return False
 
-    t = ent_text.strip()
-
-    if len(t) < 2:
+    value = ent_text.strip()
+    if len(value) < 2:
+        return False
+    if not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", value):
+        return False
+    if re.fullmatch(r"[\W_]+", value, flags=re.UNICODE):
+        return False
+    if re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", value):
+        return False
+    if re.search(r"https?://|www\.", value, flags=re.IGNORECASE):
+        return False
+    if value.startswith("@"):
         return False
 
-    # --------------------------------------------------------
-    # Debe contener por lo menos una letra
-    # --------------------------------------------------------
-
-    if not re.search(
-        r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]',
-        t
-    ):
-        return False
-
-    # --------------------------------------------------------
-    # Solo símbolos
-    # --------------------------------------------------------
-
-    if re.fullmatch(r'[\W_]+', t):
-        return False
-
-    # --------------------------------------------------------
-    # Una sola letra
-    # --------------------------------------------------------
-
-    if re.fullmatch(
-        r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]',
-        t
-    ):
-        return False
-
-    # --------------------------------------------------------
-    # URLs que pudieran haber sobrevivido
-    # --------------------------------------------------------
-
-    if re.search(
-        r'https?://|www\.',
-        t,
-        flags=re.IGNORECASE
-    ):
-        return False
-
-    # --------------------------------------------------------
-    # Username aislado extraño
-    # --------------------------------------------------------
-
-    if t.startswith("@"):
-        return False
-
-    # --------------------------------------------------------
-    # Basura genérica
-    # --------------------------------------------------------
-
-    basura = {
-        "rt",
-        "lea",
-        "lee",
-        "más",
-        "mas",
-        "video",
-        "vídeo",
-        "foto",
-        "fotos",
-        "ahora",
-        "aquí",
-        "aqui",
-        "acá",
-        "aca",
-        "vía",
-        "via",
-        "link",
-        "enlace",
+    noise = {
+        "rt", "lea", "lee", "más", "mas", "video", "vídeo", "foto",
+        "fotos", "ahora", "aquí", "aqui", "acá", "aca", "vía", "via",
+        "link", "enlace",
     }
-
-    if t.casefold() in basura:
-        return False
-
-    return True
+    return value.casefold() not in noise
 
 
-
-def entity_key(text: str) -> str:
-    """
-    Genera una representación comparable.
-
-    Ejemplo:
-
-    "La Paz" -> "la paz"
-    "LA PAZ" -> "la paz"
-
-    Esto solamente se utiliza para deduplicar.
-    NO modifica el valor final almacenado.
-    """
-
+def entity_key(text):
     text = unicodedata.normalize("NFKC", text)
-
-    text = re.sub(r'\s+', ' ', text)
-
+    text = re.sub(r"\s+", " ", text)
     return text.strip().casefold()
+
+
+def _get_structural_spans(doc):
+    spans = set()
+    for match_id, start, end in _STRUCTURAL_MATCHER(doc):
+        label = _STRUCTURAL_LABELS.get(match_id)
+        spans.add((start, end, label))
+    return spans
+
+
 def get_entities_detailed(text):
+    clean_text = preprocess_text(text)
+    if not clean_text:
+        return {"PER": [], "ORG": [], "LOC": [], "MISC": []}
 
-    text = preprocess_text(text)
+    doc = nlp(clean_text)
+    structural_spans = _get_structural_spans(doc)
 
-    if not text or not isinstance(text, str):
-        return {
-            "PER": [],
-            "ORG": [],
-            "LOC": [],
-            "MISC": []
-        }
-
-    doc = nlp(text)
-
-    entidades = {
-        "PER": [],
-        "ORG": [],
-        "LOC": [],
-        "MISC": []
-    }
-
-    seen = {
-        "PER": set(),
-        "ORG": set(),
-        "LOC": set(),
-        "MISC": set()
-    }
+    entities = {"PER": [], "ORG": [], "LOC": [], "MISC": []}
+    seen = {"PER": set(), "ORG": set(), "LOC": set(), "MISC": set()}
 
     for ent in doc.ents:
-
-        label = ent.label_
-
-        if label not in entidades:
-            label = "MISC"
-
+        label = ent.label_ if ent.label_ in entities else "MISC"
         entity_text = normalize_entity(ent.text)
-
         if not is_valid_entity(entity_text, label):
             continue
 
         key = entity_key(entity_text)
-
         if key in seen[label]:
             continue
-
         seen[label].add(key)
 
-        entidades[label].append({
-        "text": entity_text,
-        "label": label,
-        "canonical_id": ent.ent_id_ if ent.ent_id_ else None,
-        "start_char": ent.start_char,
-        "end_char": ent.end_char,
-        "detection_source": (
-            "ruler"
-            if ent.ent_id_
-            else "ner"
-        )
-})
+        canonical_id = ent.ent_id_ or None
+        if canonical_id:
+            detection_source = "ruler"
+        elif (ent.start, ent.end, label) in structural_spans:
+            detection_source = "ruler_structural"
+        else:
+            detection_source = "ner"
 
-    return entidades
+        entities[label].append({
+            "text": entity_text,
+            "label": label,
+            "canonical_id": canonical_id,
+            # Estos offsets corresponden al texto PREPROCESADO.
+            "start_char": ent.start_char,
+            "end_char": ent.end_char,
+            "detection_source": detection_source,
+        })
+
+    return entities
 
 
 def get_entities(text):
-    """
-    Mantiene EXACTAMENTE la interfaz anterior utilizada
-    por el proceso actual de NetVora.
-
-    Ejemplo:
-
-    {
-        "PER": ["Luis Arce"],
-        "ORG": ["YPFB"],
-        "LOC": ["La Paz"],
-        "MISC": []
-    }
-    """
-
+    """Interfaz legacy: retorna listas de strings por tipo."""
     detailed = get_entities_detailed(text)
+    return {
+        label: [entity["text"] for entity in label_entities]
+        for label, label_entities in detailed.items()
+    }
 
+
+def get_resolvable_entities(text):
+    """Salida recomendada para alimentar resolve_entity()/tweet_entities."""
+    detailed = get_entities_detailed(text)
     return {
         label: [
-            entity["text"]
-            for entity in entities
+            entity
+            for entity in label_entities
+            if should_resolve_entity(entity, text=text)
         ]
-        for label, entities in detailed.items()
+        for label, label_entities in detailed.items()
     }
 
-# ============================================================
-# 7. FUNCIÓN DE DEBUG
-# ============================================================
 
 def debug_entities(text):
-    """
-    Función solamente para pruebas.
-
-    Permite comparar:
-    texto original
-    texto limpio
-    entidades crudas de spaCy
-    entidades finales
-    """
-
     clean_text = preprocess_text(text)
-
-    doc = nlp(clean_text)
-
+    doc = nlp(clean_text) if clean_text else None
     raw_entities = []
-
-    for ent in doc.ents:
-        raw_entities.append({
-            "text": ent.text,
-            "label": ent.label_,
-            "start": ent.start_char,
-            "end": ent.end_char
-        })
+    if doc is not None:
+        for ent in doc.ents:
+            raw_entities.append({
+                "text": ent.text,
+                "label": ent.label_,
+                "canonical_id": ent.ent_id_ or None,
+                "start": ent.start_char,
+                "end": ent.end_char,
+            })
 
     return {
         "original": text,
         "clean": clean_text,
         "spacy_raw": raw_entities,
-        "final": get_entities(text)
+        "final": get_entities(text),
+        "resolvable": get_resolvable_entities(text),
     }
+
+
+__all__ = [
+    "nlp",
+    "preprocess_text",
+    "normalize_entity",
+    "is_valid_entity",
+    "get_entities_detailed",
+    "get_entities",
+    "get_resolvable_entities",
+    "debug_entities",
+]

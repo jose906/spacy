@@ -1,1115 +1,338 @@
-# ============================================================
+# -*- coding: utf-8 -*-
+"""Reglas y catálogo de entidades de NetVora.
 
-# ENTITY PATTERNS - NETVORA
+Compatible con spaCy 3.x y Python 3.8+.
+Las entidades conocidas reciben un ``id`` estable; los patrones
+estructurales NO reciben id para evitar fusionar organizaciones distintas.
+"""
 
-# ============================================================
-
-# Reglas complementarias para es_core_news_lg.
-
-#
-
-# Objetivos:
-
-# 1. Corregir errores conocidos del NER.
-
-# 2. Reconocer instituciones bolivianas frecuentes.
-
-# 3. Reconocer familias institucionales mediante estructura.
-
-# 4. Unificar alias mediante ent_id.
-
-#
-
-# IMPORTANTE:
-
-# No pretendemos reemplazar spaCy.
-
-# Estas reglas complementan el modelo estadístico.
-
-# ============================================================
+import unicodedata
 
 
+VALID_ENTITY_TYPES = {"PER", "ORG", "LOC", "MISC"}
 
-
-
-# ============================================================
-
-# FILTROS DE CALIDAD
-
-# ============================================================
-
-
-
+# Términos que nunca deben convertirse por sí solos en entidades normalizadas.
+# Se guardan ya normalizados (minúsculas y sin acentos), porque
+# entity_resolver.normalize_alias() trabaja así.
 ENTITY_STOPLIST = {
-
     "el", "la", "los", "las",
-
     "un", "una", "unos", "unas",
-
     "este", "esta", "esto",
-
     "ese", "esa", "aquel", "aquella",
-
     "buenos dias", "buenas tardes", "buenas noches",
-
 }
-
-
 
 GENERIC_ENTITY_PHRASES = {
-
     "el jefe de estado",
-
     "jefe de estado",
-
     "la informacion",
-
     "informacion",
-
+    # Falsos positivos observados en el dataset de NetVora.
+    "gobierno",
+    "politica",
 }
 
 
-
-
-
-# ============================================================
-
-# ENTIDADES CONOCIDAS
-
-# ============================================================
-
-# Cada entidad se define UNA SOLA VEZ.
-
-#
-
-# key     -> external_key / canonical_id estable
-
-# name    -> nombre canónico para mostrar y guardar
-
-# type    -> PER / ORG / LOC / MISC
-
-# aliases -> formas que EntityRuler debe reconocer
-
-# ============================================================
-
-
-
-KNOWN_ENTITIES = {
-    
-    "TIKITA_WARA": {
-    "name": "T'ikita Wara",
-    "type": "PER",
-    "aliases": [
-        "T'ikita Wara",
-        "T’ikita Wara",
-    ],
-},
-    
-        "COB": {
-        "name": "Central Obrera Boliviana",
-        "type": "ORG",
-        "aliases": [
-            "COB",
-            "Central Obrera Boliviana",
-        ],
-    },
-
-    "CAO": {
-        "name": "Cámara Agropecuaria del Oriente",
-        "type": "ORG",
-        "aliases": [
-            "CAO",
-            "Cámara Agropecuaria del Oriente",
-        ],
-    },
-
-    "FELCC": {
-        "name": "Fuerza Especial de Lucha Contra el Crimen",
-        "type": "ORG",
-        "aliases": [
-            "FELCC",
-            "Fuerza Especial de Lucha Contra el Crimen",
-        ],
-    },
-
-    "ATT": {
-        "name": "Autoridad de Regulación y Fiscalización de Telecomunicaciones y Transportes",
-        "type": "ORG",
-        "aliases": [
-            "ATT",
-            "Autoridad de Regulación y Fiscalización de Telecomunicaciones y Transportes",
-        ],
-    },
-
-    "ASFI": {
-        "name": "Autoridad de Supervisión del Sistema Financiero",
-        "type": "ORG",
-        "aliases": [
-            "ASFI",
-            "Autoridad de Supervisión del Sistema Financiero",
-        ],
-    },
-
-    "UAGRM": {
-        "name": "Universidad Autónoma Gabriel René Moreno",
-        "type": "ORG",
-        "aliases": [
-            "UAGRM",
-            "Universidad Autónoma Gabriel René Moreno",
-        ],
-    },
-
-    # --------------------------------------------------------
-
-    # EMPRESAS / ORGANIZACIONES DETECTADAS EN DATOS REALES
-
-    # --------------------------------------------------------
-
-    "TOYOSA": {
-
-        "name": "Toyosa",
-
-        "type": "ORG",
-
-        "aliases": ["Toyosa"],
-
-    },
-
-    "ORGANO_JUDICIAL_BOLIVIA": {
-
-        "name": "Órgano Judicial",
-
-        "type": "ORG",
-
-        "aliases": ["Órgano Judicial"],
-
-    },
-
-    "CONFEDERACION_AGROPECUARIA_NACIONAL": {
-
-        "name": "Confederación Agropecuaria Nacional",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "CONFEAGRO",
-
-            "Confederación Agropecuaria Nacional",
-
-        ],
-
-    },
-
-
-
-    # --------------------------------------------------------
-
-    # MEDIOS
-
-    # --------------------------------------------------------
-
-    "AGENCIA_NOTICIAS_FIDES": {
-
-        "name": "Agencia de Noticias Fides",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "ANF",
-
-            "Agencia de Noticias Fides",
-
-        ],
-
-    },
-
-    "GRUPO_FIDES": {
-
-        "name": "Grupo Fides",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "GrupoFides",
-
-            "Grupo Fides",
-
-        ],
-
-    },
-
-
-
-    # --------------------------------------------------------
-
-    # ORGANIZACIONES EMPRESARIALES
-
-    # --------------------------------------------------------
-
-    "CONFEDERACION_EMPRESARIOS_PRIVADOS_BOLIVIA": {
-
-        "name": "Confederación de Empresarios Privados de Bolivia",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "CEPB",
-
-            "Confederación de Empresarios Privados de Bolivia",
-
-        ],
-
-    },
-
-
-
-    # --------------------------------------------------------
-
-    # PARTIDOS
-
-    # --------------------------------------------------------
-
-    "PARTIDO_DEMOCRATA_CRISTIANO": {
-
-        "name": "Partido Demócrata Cristiano",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "PDC",
-
-            "Partido Demócrata Cristiano",
-
-        ],
-
-    },
-
-
-
-    # --------------------------------------------------------
-
-    # EMPRESAS / ENTIDADES ESTATALES
-
-    # --------------------------------------------------------
-
-    "YPFB": {
-
-        "name": "Yacimientos Petrolíferos Fiscales Bolivianos",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "YPFB",
-
-            "Yacimientos Petrolíferos Fiscales Bolivianos",
-
-        ],
-
-    },
-
-    "BANCO_CENTRAL_BOLIVIA": {
-
-        "name": "Banco Central de Bolivia",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "BCB",
-
-            "Banco Central de Bolivia",
-
-        ],
-
-    },
-
-
-
-    # --------------------------------------------------------
-
-    # ÓRGANO ELECTORAL
-
-    # --------------------------------------------------------
-
-    "ORGANO_ELECTORAL_PLURINACIONAL": {
-
-        "name": "Órgano Electoral Plurinacional",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "OEP",
-
-            "Órgano Electoral Plurinacional",
-
-        ],
-
-    },
-
-    "TRIBUNAL_SUPREMO_ELECTORAL": {
-
-        "name": "Tribunal Supremo Electoral",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "TSE",
-
-            "Tribunal Supremo Electoral",
-
-        ],
-
-    },
-
-
-
-    # --------------------------------------------------------
-
-    # PODER LEGISLATIVO
-
-    # --------------------------------------------------------
-
-    "ASAMBLEA_LEGISLATIVA_PLURINACIONAL": {
-
-        "name": "Asamblea Legislativa Plurinacional",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "ALP",
-
-            "Asamblea Legislativa Plurinacional",
-
-        ],
-
-    },
-
-    "CAMARA_DIPUTADOS": {
-
-        "name": "Cámara de Diputados",
-
-        "type": "ORG",
-
-        "aliases": ["Cámara de Diputados"],
-
-    },
-
-    "CAMARA_SENADORES": {
-
-        "name": "Cámara de Senadores",
-
-        "type": "ORG",
-
-        "aliases": ["Cámara de Senadores"],
-
-    },
-
-
-
-    # --------------------------------------------------------
-
-    # OTRAS ENTIDADES PÚBLICAS
-
-    # --------------------------------------------------------
-
-    "SENAMHI": {
-        "name": "Servicio Nacional de Meteorología e Hidrología",
-        "type": "ORG",
-        "aliases": [
-            "SENAMHI",
-            "Senamhi",
-            "Servicio Nacional de Meteorología e Hidrología",
-        ],
-    },
-    "EMAPA": {
-        "name": "Empresa de Apoyo a la Producción de Alimentos",
-        "type": "ORG",
-        "aliases": [
-            "EMAPA",
-            "Empresa de Apoyo a la Producción de Alimentos",
-        ],
-    },
-    "ADMINISTRADORA_BOLIVIANA_CARRETERAS": {
-
-        "name": "Administradora Boliviana de Carreteras",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "ABC",
-
-            "Administradora Boliviana de Carreteras",
-
-        ],
-
-    },
-
-    "AGENCIA_NACIONAL_HIDROCARBUROS": {
-
-        "name": "Agencia Nacional de Hidrocarburos",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "ANH",
-
-            "Agencia Nacional de Hidrocarburos",
-
-        ],
-
-    },
-
-    "INSTITUTO_NACIONAL_ESTADISTICA": {
-
-        "name": "Instituto Nacional de Estadística",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "INE",
-
-            "Instituto Nacional de Estadística",
-
-        ],
-
-    },
-
-    "SEGIP": {
-
-        "name": "SEGIP",
-
-        "type": "ORG",
-
-        "aliases": ["SEGIP"],
-
-    },
-
-    "AGETIC": {
-
-        "name": "AGETIC",
-
-        "type": "ORG",
-
-        "aliases": ["AGETIC"],
-
-    },
-
-    "ADUANA_NACIONAL": {
-
-        "name": "Aduana Nacional",
-
-        "type": "ORG",
-
-        "aliases": ["Aduana Nacional"],
-
-    },
-
-    "POLICIA_BOLIVIANA": {
-
-        "name": "Policía Boliviana",
-
-        "type": "ORG",
-
-        "aliases": ["Policía Boliviana"],
-
-    },
-
-    "FUERZAS_ARMADAS_BOLIVIA": {
-
-        "name": "Fuerzas Armadas",
-
-        "type": "ORG",
-
-        "aliases": ["Fuerzas Armadas"],
-
-    },
-
-
-
-    # --------------------------------------------------------
-
-    # JUSTICIA
-
-    # --------------------------------------------------------
-
-    "TRIBUNAL_CONSTITUCIONAL_PLURINACIONAL": {
-
-        "name": "Tribunal Constitucional Plurinacional",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "TCP",
-
-            "Tribunal Constitucional Plurinacional",
-
-        ],
-
-    },
-
-    "TRIBUNAL_SUPREMO_JUSTICIA": {
-
-        "name": "Tribunal Supremo de Justicia",
-
-        "type": "ORG",
-
-        "aliases": [
-
-            "TSJ",
-
-            "Tribunal Supremo de Justicia",
-
-        ],
-
-    },
-
-    "FISCALIA_GENERAL_ESTADO": {
-
-        "name": "Fiscalía General del Estado",
-
-        "type": "ORG",
-
-        "aliases": ["Fiscalía General del Estado"],
-
-    },
-
-
-
-    # --------------------------------------------------------
-
-    # CONCEJOS
-
-    # --------------------------------------------------------
-
-    "CONCEJO_MUNICIPAL": {
-
-        "name": "Concejo Municipal",
-
-        "type": "ORG",
-
-        "aliases": ["Concejo Municipal"],
-
-    },
-
-    "MINISTERIO_PRESIDENCIA_BOLIVIA": {
-
-    "name": "Ministerio de la Presidencia",
-
-    "type": "ORG",
-
-    "aliases": [
-
-        "Ministerio de la Presidencia",
-
-    ],
-
-},
-
-}
-
-
-
-
-
-
-
-
-
-# ============================================================
-
-# CATÁLOGO CANÓNICO
-
-# ============================================================
-
-# Mantiene compatibilidad con entity_resolver.py:
-
-#
-
-# from entity_patterns import ENTITY_CATALOG
-
-# ============================================================
-
+KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara",
+                 'type': 'PER',
+                 'aliases': ["T'ikita Wara", 'T’ikita Wara']},
+ 'COB': {'name': 'Central Obrera Boliviana',
+         'type': 'ORG',
+         'aliases': ['COB', 'Central Obrera Boliviana']},
+ 'CAO': {'name': 'Cámara Agropecuaria del Oriente',
+         'type': 'ORG',
+         'aliases': ['CAO', 'Cámara Agropecuaria del Oriente']},
+ 'FELCC': {'name': 'Fuerza Especial de Lucha Contra el Crimen',
+           'type': 'ORG',
+           'aliases': ['FELCC', 'Fuerza Especial de Lucha Contra el Crimen']},
+ 'ATT': {'name': 'Autoridad de Regulación y Fiscalización de Telecomunicaciones y Transportes',
+         'type': 'ORG',
+         'aliases': ['ATT',
+                     'Autoridad de Regulación y Fiscalización de Telecomunicaciones y '
+                     'Transportes']},
+ 'ASFI': {'name': 'Autoridad de Supervisión del Sistema Financiero',
+          'type': 'ORG',
+          'aliases': ['ASFI', 'Autoridad de Supervisión del Sistema Financiero']},
+ 'UAGRM': {'name': 'Universidad Autónoma Gabriel René Moreno',
+           'type': 'ORG',
+           'aliases': ['UAGRM', 'Universidad Autónoma Gabriel René Moreno']},
+ 'TOYOSA': {'name': 'Toyosa', 'type': 'ORG', 'aliases': ['Toyosa']},
+ 'ORGANO_JUDICIAL_BOLIVIA': {'name': 'Órgano Judicial',
+                             'type': 'ORG',
+                             'aliases': ['Órgano Judicial']},
+ 'CONFEDERACION_AGROPECUARIA_NACIONAL': {'name': 'Confederación Agropecuaria Nacional',
+                                         'type': 'ORG',
+                                         'aliases': ['CONFEAGRO',
+                                                     'Confederación Agropecuaria Nacional']},
+ 'AGENCIA_NOTICIAS_FIDES': {'name': 'Agencia de Noticias Fides',
+                            'type': 'ORG',
+                            'aliases': ['ANF', 'Agencia de Noticias Fides']},
+ 'GRUPO_FIDES': {'name': 'Grupo Fides', 'type': 'ORG', 'aliases': ['GrupoFides', 'Grupo Fides']},
+ 'CONFEDERACION_EMPRESARIOS_PRIVADOS_BOLIVIA': {'name': 'Confederación de Empresarios Privados de '
+                                                        'Bolivia',
+                                                'type': 'ORG',
+                                                'aliases': ['CEPB',
+                                                            'Confederación de Empresarios Privados '
+                                                            'de Bolivia']},
+ 'PARTIDO_DEMOCRATA_CRISTIANO': {'name': 'Partido Demócrata Cristiano',
+                                 'type': 'ORG',
+                                 'aliases': ['PDC', 'Partido Demócrata Cristiano']},
+ 'YPFB': {'name': 'Yacimientos Petrolíferos Fiscales Bolivianos',
+          'type': 'ORG',
+          'aliases': ['YPFB', 'Yacimientos Petrolíferos Fiscales Bolivianos']},
+ 'BANCO_CENTRAL_BOLIVIA': {'name': 'Banco Central de Bolivia',
+                           'type': 'ORG',
+                           'aliases': ['BCB', 'Banco Central de Bolivia']},
+ 'ORGANO_ELECTORAL_PLURINACIONAL': {'name': 'Órgano Electoral Plurinacional',
+                                    'type': 'ORG',
+                                    'aliases': ['OEP', 'Órgano Electoral Plurinacional']},
+ 'TRIBUNAL_SUPREMO_ELECTORAL': {'name': 'Tribunal Supremo Electoral',
+                                'type': 'ORG',
+                                'aliases': ['TSE', 'Tribunal Supremo Electoral']},
+ 'ASAMBLEA_LEGISLATIVA_PLURINACIONAL': {'name': 'Asamblea Legislativa Plurinacional',
+                                        'type': 'ORG',
+                                        'aliases': ['ALP', 'Asamblea Legislativa Plurinacional']},
+ 'CAMARA_DIPUTADOS': {'name': 'Cámara de Diputados',
+                      'type': 'ORG',
+                      'aliases': ['Cámara de Diputados']},
+ 'CAMARA_SENADORES': {'name': 'Cámara de Senadores',
+                      'type': 'ORG',
+                      'aliases': ['Cámara de Senadores']},
+ 'SENAMHI': {'name': 'Servicio Nacional de Meteorología e Hidrología',
+             'type': 'ORG',
+             'aliases': ['SENAMHI', 'Senamhi', 'Servicio Nacional de Meteorología e Hidrología']},
+ 'EMAPA': {'name': 'Empresa de Apoyo a la Producción de Alimentos',
+           'type': 'ORG',
+           'aliases': ['EMAPA', 'Empresa de Apoyo a la Producción de Alimentos']},
+ 'ADMINISTRADORA_BOLIVIANA_CARRETERAS': {'name': 'Administradora Boliviana de Carreteras',
+                                         'type': 'ORG',
+                                         'aliases': ['ABC',
+                                                     'Administradora Boliviana de Carreteras']},
+ 'AGENCIA_NACIONAL_HIDROCARBUROS': {'name': 'Agencia Nacional de Hidrocarburos',
+                                    'type': 'ORG',
+                                    'aliases': ['ANH', 'Agencia Nacional de Hidrocarburos']},
+ 'INSTITUTO_NACIONAL_ESTADISTICA': {'name': 'Instituto Nacional de Estadística',
+                                    'type': 'ORG',
+                                    'aliases': ['INE', 'Instituto Nacional de Estadística']},
+ 'SEGIP': {'name': 'SEGIP', 'type': 'ORG', 'aliases': ['SEGIP']},
+ 'AGETIC': {'name': 'AGETIC', 'type': 'ORG', 'aliases': ['AGETIC']},
+ 'ADUANA_NACIONAL': {'name': 'Aduana Nacional', 'type': 'ORG', 'aliases': ['Aduana Nacional']},
+ 'POLICIA_BOLIVIANA': {'name': 'Policía Boliviana',
+                       'type': 'ORG',
+                       'aliases': ['Policía Boliviana']},
+ 'FUERZAS_ARMADAS_BOLIVIA': {'name': 'Fuerzas Armadas',
+                             'type': 'ORG',
+                             'aliases': ['Fuerzas Armadas']},
+ 'TRIBUNAL_CONSTITUCIONAL_PLURINACIONAL': {'name': 'Tribunal Constitucional Plurinacional',
+                                           'type': 'ORG',
+                                           'aliases': ['TCP',
+                                                       'Tribunal Constitucional Plurinacional']},
+ 'TRIBUNAL_SUPREMO_JUSTICIA': {'name': 'Tribunal Supremo de Justicia',
+                               'type': 'ORG',
+                               'aliases': ['TSJ', 'Tribunal Supremo de Justicia']},
+ 'FISCALIA_GENERAL_ESTADO': {'name': 'Fiscalía General del Estado',
+                             'type': 'ORG',
+                             'aliases': ['Fiscalía General del Estado']},
+ 'CONCEJO_MUNICIPAL': {'name': 'Concejo Municipal',
+                       'type': 'ORG',
+                       'aliases': ['Concejo Municipal']},
+ 'MINISTERIO_PRESIDENCIA_BOLIVIA': {'name': 'Ministerio de la Presidencia',
+                                    'type': 'ORG',
+                                    'aliases': ['Ministerio de la Presidencia']}}
+
+
+
+def _strip_diacritics(text):
+    """Devuelve una variante sin tildes para texto social informal."""
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _alias_variants(alias):
+    """Genera variantes seguras de un alias sin inventar abreviaturas."""
+    variants = [alias]
+    accentless = _strip_diacritics(alias)
+    if accentless != alias:
+        variants.append(accentless)
+
+    # Unifica apóstrofes frecuentes, conservando también la forma original.
+    straight = alias.replace("’", "'").replace("‘", "'").replace("`", "'")
+    if straight not in variants:
+        variants.append(straight)
+
+    return variants
+
+
+def _normalized_pattern_key(text):
+    return " ".join(_strip_diacritics(text).casefold().split())
+
+
+def _validate_known_entities():
+    """Falla temprano si el catálogo tiene tipos o alias ambiguos."""
+    aliases = {}
+    for external_key, data in KNOWN_ENTITIES.items():
+        if data.get("type") not in VALID_ENTITY_TYPES:
+            raise ValueError("Tipo inválido para %s: %r" % (external_key, data.get("type")))
+        if not data.get("name"):
+            raise ValueError("Entidad sin nombre canónico: %s" % external_key)
+        if not data.get("aliases"):
+            raise ValueError("Entidad sin aliases: %s" % external_key)
+
+        for alias in data["aliases"]:
+            for variant in _alias_variants(alias):
+                key = _normalized_pattern_key(variant)
+                previous = aliases.get(key)
+                if previous and previous != external_key:
+                    raise ValueError(
+                        "Alias ambiguo %r entre %s y %s" % (alias, previous, external_key)
+                    )
+                aliases[key] = external_key
+
+
+_validate_known_entities()
 
 
 ENTITY_CATALOG = {
-
-    external_key: {
-
-        "name": data["name"],
-
-        "type": data["type"],
-
-    }
-
+    external_key: {"name": data["name"], "type": data["type"]}
     for external_key, data in KNOWN_ENTITIES.items()
-
 }
 
 
-
-
-
-# ============================================================
-
-# PATTERNS DE ENTIDADES CONOCIDAS
-
-# ============================================================
-
-# Se generan automáticamente desde KNOWN_ENTITIES.
-
-# Cada alias recibe el mismo external_key mediante "id".
-
-# ============================================================
-
-
-
+# Frases conocidas: el mismo id une sigla, nombre largo y variantes sin tildes.
 KNOWN_ENTITY_PATTERNS = []
-
-
-
+_seen_known_patterns = set()
 for external_key, data in KNOWN_ENTITIES.items():
-
     for alias in data.get("aliases", []):
-
-        KNOWN_ENTITY_PATTERNS.append({
-
-            "label": data["type"],
-
-            "pattern": alias,
-
-            "id": external_key,
-
-        })
-
-
+        for variant in _alias_variants(alias):
+            key = (data["type"], " ".join(variant.casefold().split()), external_key)
+            if key in _seen_known_patterns:
+                continue
+            _seen_known_patterns.add(key)
+            KNOWN_ENTITY_PATTERNS.append({
+                "label": data["type"],
+                "pattern": variant,
+                "id": external_key,
+            })
 
 
-
-# ============================================================
-
-# PATRONES ESTRUCTURALES
-
-# ============================================================
-
-# Estos NO reciben "id".
-
-#
-
-# No representan una organización concreta del catálogo.
-
-# Solamente indican que una estructura lingüística suele
-
-# representar una organización.
-
-#
-
-# IMPORTANTE:
-
-# Nunca poner un id genérico como MINISTERIO o UNIVERSIDAD,
-
-# porque eso fusionaría organizaciones diferentes.
-
-# ============================================================
-
-
+# Los cuantificadores están acotados para impedir que una regla estructural
+# absorba media oración. spaCy Matcher admite {n,m} en OP.
+_NAME_TOKENS = {
+    "POS": {"IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET", "CCONJ"]},
+    "IS_PUNCT": False,
+    "OP": "{1,8}",
+}
+_PLACE_TOKENS = {
+    "POS": {"IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET"]},
+    "IS_PUNCT": False,
+    "OP": "{1,6}",
+}
 
 STRUCTURAL_PATTERNS = [
-
-    # --------------------------------------------------------
-
-    # MINISTERIOS
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
             {"LOWER": "ministerio"},
-
             {"LOWER": "de"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["NOUN", "PROPN", "ADJ"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            dict(_NAME_TOKENS),
         ],
-
     },
-
-
-
-    # --------------------------------------------------------
-
-    # VICEMINISTERIOS
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
             {"LOWER": "viceministerio"},
-
             {"LOWER": "de"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["NOUN", "PROPN", "ADJ", "ADP", "CCONJ"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            dict(_NAME_TOKENS),
         ],
-
     },
-
-
-
-    # --------------------------------------------------------
-
-    # UNIVERSIDADES
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
             {"LOWER": "universidad"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["PROPN", "ADJ", "NOUN", "ADP", "DET", "CCONJ"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            dict(_NAME_TOKENS),
         ],
-
     },
-
-
-
-    # --------------------------------------------------------
-
-    # GOBIERNOS AUTÓNOMOS MUNICIPALES
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
             {"LOWER": "gobierno"},
-
-            {"LOWER": "autónomo"},
-
+            {"LOWER": {"IN": ["autónomo", "autonomo"]}},
             {"LOWER": "municipal"},
-
             {"LOWER": "de"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["PROPN", "ADP", "DET"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            dict(_PLACE_TOKENS),
         ],
-
     },
-
-
-
-    # --------------------------------------------------------
-
-    # GOBIERNOS AUTÓNOMOS DEPARTAMENTALES
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
             {"LOWER": "gobierno"},
-
-            {"LOWER": "autónomo"},
-
+            {"LOWER": {"IN": ["autónomo", "autonomo"]}},
             {"LOWER": "departamental"},
-
             {"LOWER": "de"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["PROPN", "ADP", "DET"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            dict(_PLACE_TOKENS),
         ],
-
     },
-
-
-
-    # --------------------------------------------------------
-
-    # ASAMBLEAS LEGISLATIVAS DEPARTAMENTALES
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
             {"LOWER": "asamblea"},
-
             {"LOWER": "legislativa"},
-
             {"LOWER": "departamental"},
-
             {"LOWER": "de"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["PROPN", "ADP", "DET"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            dict(_PLACE_TOKENS),
         ],
-
     },
-
-
-
-    # --------------------------------------------------------
-
-    # TRIBUNALES ELECTORALES DEPARTAMENTALES
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
             {"LOWER": "tribunal"},
-
             {"LOWER": "electoral"},
-
             {"LOWER": "departamental"},
-
             {"LOWER": "de"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["PROPN", "ADP", "DET"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            dict(_PLACE_TOKENS),
         ],
-
     },
-
-
-
-    # --------------------------------------------------------
-
-    # FEDERACIONES
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
-            {"LOWER": "federación"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET", "CCONJ"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            {"LOWER": {"IN": ["federación", "federacion"]}},
+            dict(_NAME_TOKENS),
         ],
-
     },
-
-
-
-    # --------------------------------------------------------
-
-    # CONFEDERACIONES
-
-    # --------------------------------------------------------
-
-
-
-    # --------------------------------------------------------
-
-    # CÁMARAS EMPRESARIALES / INSTITUCIONALES
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
-            {"LOWER": "cámara"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET", "CCONJ"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            {"LOWER": {"IN": ["confederación", "confederacion"]}},
+            dict(_NAME_TOKENS),
         ],
-
     },
-
-
-
-    # --------------------------------------------------------
-
-    # INSTITUTOS NACIONALES
-
-    # --------------------------------------------------------
-
     {
-
         "label": "ORG",
-
         "pattern": [
-
+            {"LOWER": {"IN": ["cámara", "camara"]}},
+            dict(_NAME_TOKENS),
+        ],
+    },
+    {
+        "label": "ORG",
+        "pattern": [
             {"LOWER": "instituto"},
-
             {"LOWER": "nacional"},
-
-            {
-
-                "POS": {
-
-                    "IN": ["PROPN", "NOUN", "ADJ", "ADP", "DET", "CCONJ"]
-
-                },
-
-                "OP": "+",
-
-            },
-
+            dict(_NAME_TOKENS),
         ],
-
     },
-
 ]
 
 
-
-
-
-# ============================================================
-
-# EXPORT FINAL PARA SPACY
-
-# ============================================================
-
-# spacyscript.py puede seguir usando exactamente:
-
-#
-
-# from entity_patterns import ENTITY_PATTERNS
-
-#
-
-# ruler.add_patterns(ENTITY_PATTERNS)
-
-# ============================================================
-
-
-
+# Compatibilidad con código anterior.
 ENTITY_PATTERNS = STRUCTURAL_PATTERNS + KNOWN_ENTITY_PATTERNS
 
-
+__all__ = [
+    "ENTITY_STOPLIST",
+    "GENERIC_ENTITY_PHRASES",
+    "KNOWN_ENTITIES",
+    "ENTITY_CATALOG",
+    "KNOWN_ENTITY_PATTERNS",
+    "STRUCTURAL_PATTERNS",
+    "ENTITY_PATTERNS",
+]
