@@ -140,6 +140,13 @@ def should_resolve_entity(entity, text=None):
     normalized = normalize_alias(mention)
     if not normalized:
         return False
+    if (
+    detection_source == "ner"
+    and entity_type == "PER"
+    and normalized == "paz"
+    and canonical_id is None
+):
+        return False
 
     # Stoplists exactas. Aquí queda resuelto el falso positivo "Gobierno".
     if normalized in ENTITY_STOPLIST or normalized in GENERIC_ENTITY_PHRASES:

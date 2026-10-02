@@ -28,12 +28,15 @@ def _known_patterns_as_token_patterns(nlp_obj):
     La tokenización la hace el tokenizer real del modelo con ``make_doc``.
     """
     converted = []
+
     for item in KNOWN_ENTITY_PATTERNS:
         pattern = item.get("pattern")
+
         if isinstance(pattern, str):
             doc = nlp_obj.make_doc(pattern)
             if not doc:
                 continue
+
             token_pattern = [{"LOWER": token.lower_} for token in doc]
             converted.append({
                 "label": item["label"],
@@ -41,7 +44,9 @@ def _known_patterns_as_token_patterns(nlp_obj):
                 "id": item.get("id"),
             })
         else:
+            # Si el catálogo ya trae un token pattern explícito, se conserva.
             converted.append(dict(item))
+
     return converted
 
 
@@ -84,6 +89,7 @@ def _build_nlp(model_name=MODEL_NAME):
         config={"overwrite_ents": True, "validate": True},
     )
     known_ruler.add_patterns(_known_patterns_as_token_patterns(nlp_obj))
+
     return nlp_obj
 
 
@@ -91,10 +97,12 @@ def _build_structural_matcher(nlp_obj):
     """Matcher paralelo usado solo para identificar la fuente de un span."""
     matcher = Matcher(nlp_obj.vocab, validate=True)
     labels = {}
+
     for index, item in enumerate(STRUCTURAL_PATTERNS):
         rule_name = "NETVORA_STRUCT_%s_%d" % (item["label"], index)
         matcher.add(rule_name, [item["pattern"]])
         labels[nlp_obj.vocab.strings[rule_name]] = item["label"]
+
     return matcher, labels
 
 
@@ -115,55 +123,66 @@ def split_camel_case(value):
         " ",
         value,
     )
+
     # ATBDigital -> ATB Digital; YPFB queda intacto.
     value = re.sub(
         r"(?<=[A-ZÁÉÍÓÚÜÑ])(?=[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ])",
         " ",
         value,
     )
+
     return re.sub(r"\s+", " ", value).strip()
 
 
 def replace_hashtag(match):
-    hashtag = match.group(1)
-    hashtag = split_camel_case(hashtag)
+    """Conserva el contenido del hashtag, pero lo aísla del texto vecino.
 
-    # Aislamos el hashtag por ambos lados.
-    #
-    # "Senasag #Economía"
-    # -> "Senasag. Economía."
-    #
-    # "#GrupoFides #ANF #Sucre"
-    # -> ". Grupo Fides. . ANF. . Sucre."
-    #
-    # Evita que spaCy fusione la palabra anterior
-    # con el contenido del hashtag.
+    Ejemplos:
+      Senasag #Economía -> Senasag. Economía.
+      #GrupoFides #ANF  -> Grupo Fides. ANF.
+
+    La frontera evita falsos spans como ``Senasag Economía``.
+    """
+    hashtag = split_camel_case(match.group(1))
+
+    if not hashtag:
+        return " "
+
     return ". " + hashtag + ". "
 
 
 def replace_mention(match):
-    # Los handles NO se convierten en texto para NER.
+    """Elimina handles: no deben convertirse en candidatos NER."""
+
     # @correodelsurcom no debe transformarse en una falsa LOC/ORG/PER.
     return " "
 
 
 def _remove_editorial_credits(text):
-    """Elimina créditos fotográficos/editoriales que no son contenido NER."""
-    # 📸APG / 📷 APG / 📸 Juan Perez
-    # Crédito fotográfico compacto:
-    # 📸APG -> eliminado
-    # 📷 ABI -> eliminado
-    # pero NO consume el texto que viene después.
+    """Elimina créditos fotográficos/editoriales sin tragarse el contenido."""
 
+    # Crédito compacto asociado al emoji:
+    #
+    # 📸APG El ministro...
+    # -> El ministro...
+    #
+    # 📷 ABI Conferencia...
+    # -> Conferencia...
+    #
+    # Se elimina SOLO el primer token inmediatamente asociado al emoji.
     text = re.sub(
-        r'(?:📸|📷)\s*'
-        r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.-]{2,30}'
-        r'(?=\s|$)',
-        ' ',
-        text
+        r"(?:📸|📷)\s*"
+        r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.\-]{2,30}"
+        r"(?=\s|$)",
+        " ",
+        text,
     )
 
-    # Foto: APG / Crédito: Juan Pérez / Fotografía - APG Noticias
+    # Formatos explícitos de crédito permiten nombres de hasta 4 tokens:
+    #
+    # Foto: APG
+    # Crédito: Juan Pérez
+    # Fotografía - APG Noticias
     text = re.sub(
         r"(?i)\b(?:foto|fotograf[ií]a|cr[eé]dito)\s*[:\-]\s*"
         r"[A-ZÁÉÍÓÚÜÑ0-9][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.\-']{1,30}"
@@ -171,37 +190,63 @@ def _remove_editorial_credits(text):
         " ",
         text,
     )
+
     return text
 
 
 def preprocess_text(text):
     """Limpieza conservadora que mantiene el contexto útil para NER."""
+
     if not isinstance(text, str) or not text.strip():
         return ""
 
     text = unicodedata.normalize("NFKC", text)
-    for invisible in ("\ufe0f", "\ufe0e", "\u200b", "\ufeff", "\u2060"):
+
+    for invisible in (
+        "\ufe0f",
+        "\ufe0e",
+        "\u200b",
+        "\ufeff",
+        "\u2060",
+    ):
         text = text.replace(invisible, " ")
+
     text = text.replace("\xa0", " ")
-    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+
+    text = (
+        text
+        .replace("\n", " ")
+        .replace("\r", " ")
+        .replace("\t", " ")
+    )
 
     # RT aislado, con dos puntos opcionales.
-    text = re.sub(r"(?i)(?<!\w)RT(?!\w)\s*:?\s*", " ", text)
+    text = re.sub(
+        r"(?i)(?<!\w)RT(?!\w)\s*:?\s*",
+        " ",
+        text,
+    )
 
     # URLs completas o www.*
-    text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"https?://\S+|www\.\S+",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
 
     # Créditos editoriales antes de limpiar emojis.
     text = _remove_editorial_credits(text)
-    text = re.sub(r'(?:\.\s*){2,}', '. ', text)
 
-
-    # Mentions se eliminan; hashtags conservan contenido semántico.
+    # Mentions se eliminan.
     text = re.sub(
         r"@([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)",
         replace_mention,
         text,
     )
+
+    # Hashtags conservan el contenido semántico,
+    # pero quedan separados del texto vecino.
     text = re.sub(
         r"#([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)",
         replace_hashtag,
@@ -209,7 +254,11 @@ def preprocess_text(text):
     )
 
     # Separadores editoriales.
-    text = re.sub(r"\s*[|│]\s*", ". ", text)
+    text = re.sub(
+        r"\s*[|│]\s*",
+        ". ",
+        text,
+    )
 
     patterns_remove = (
         r"(?i)\blea\s+m[aá]s\b\s*:?\s*",
@@ -217,34 +266,86 @@ def preprocess_text(text):
         r"(?i)\bm[aá]s\s+informaci[oó]n\b\s*:?\s*",
         r"(?i)\bmant[eé]ngase\s+informado\b\s*:?\s*",
     )
-    for pattern in patterns_remove:
-        text = re.sub(pattern, " ", text)
 
+    for pattern in patterns_remove:
+        text = re.sub(
+            pattern,
+            " ",
+            text,
+        )
+
+    # Emojis/editoriales residuales.
     text = re.sub(
-        r"[★☆◆◉▪🔴🔵🟢🟡🟠🟣🟤⚫⚪🟥🟦🟩🟨🟧🟪✅✔✳🔹🔸▶🔻🔺📌📷📸📹🎥]+",
+        r"[★☆◆◉▪🔴🔵🟢🟡🟠🟣🟤⚫⚪"
+        r"🟥🟦🟩🟨🟧🟪✅✔✳🔹🔸▶🔻🔺"
+        r"📌📷📸📹🎥]+",
         " ",
         text,
     )
 
+    # Comillas/puntuación Unicode a representación estable.
     text = (
-        text.replace("“", '"')
+        text
+        .replace("“", '"')
         .replace("”", '"')
         .replace("‘", "'")
         .replace("’", "'")
         .replace("…", "...")
     )
-    text = re.sub(r"([!?.,:;])\1{2,}", r"\1", text)
-    return re.sub(r"\s+", " ", text).strip()
+
+    # Normaliza puntuación introducida por hashtags/separadores.
+    text = re.sub(
+        r"\s+([.,;:!?])",
+        r"\1",
+        text,
+    )
+
+    text = re.sub(
+        r"(?:\.\s*){2,}",
+        ". ",
+        text,
+    )
+
+    text = re.sub(
+        r"([!?.,:;])\1{2,}",
+        r"\1",
+        text,
+    )
+
+    text = re.sub(
+        r"^\s*\.\s*",
+        "",
+        text,
+    )
+
+    return re.sub(
+        r"\s+",
+        " ",
+        text,
+    ).strip()
 
 
 def normalize_entity(ent_text):
     """Limpia bordes sin destruir la grafía original de la entidad."""
+
     if not isinstance(ent_text, str) or not ent_text:
         return ""
 
-    entity = unicodedata.normalize("NFKC", ent_text).strip()
-    entity = entity.strip(" \t\r\n,;:!? .\"'()[]{}<>-–—")
-    entity = re.sub(r"\s+", " ", entity)
+    entity = unicodedata.normalize(
+        "NFKC",
+        ent_text,
+    ).strip()
+
+    entity = entity.strip(
+        " \t\r\n,;:!? .\"'()[]{}<>-–—"
+    )
+
+    entity = re.sub(
+        r"\s+",
+        " ",
+        entity,
+    )
+
     return entity.strip()
 
 
@@ -253,159 +354,599 @@ def is_valid_entity(ent_text, label=None):
         return False
 
     value = ent_text.strip()
+
     if len(value) < 2:
         return False
-    if not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", value):
+
+    if not re.search(
+        r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]",
+        value,
+    ):
         return False
-    if re.fullmatch(r"[\W_]+", value, flags=re.UNICODE):
+
+    if re.fullmatch(
+        r"[\W_]+",
+        value,
+        flags=re.UNICODE,
+    ):
         return False
-    if re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", value):
+
+    if re.fullmatch(
+        r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]",
+        value,
+    ):
         return False
-    if re.search(r"https?://|www\.", value, flags=re.IGNORECASE):
+
+    if re.search(
+        r"https?://|www\.",
+        value,
+        flags=re.IGNORECASE,
+    ):
         return False
+
     if value.startswith("@"):
         return False
 
     noise = {
-        "rt", "lea", "lee", "más", "mas", "video", "vídeo", "foto",
-        "fotos", "ahora", "aquí", "aqui", "acá", "aca", "vía", "via",
-        "link", "enlace",
+        "rt",
+        "lea",
+        "lee",
+        "más",
+        "mas",
+        "video",
+        "vídeo",
+        "foto",
+        "fotos",
+        "ahora",
+        "aquí",
+        "aqui",
+        "acá",
+        "aca",
+        "vía",
+        "via",
+        "link",
+        "enlace",
     }
+
     return value.casefold() not in noise
 
 
 def entity_key(text):
-    text = unicodedata.normalize("NFKC", text)
-    text = re.sub(r"\s+", " ", text)
+    """Clave ligera para deduplicación/contexto dentro del mismo documento."""
+
+    if not isinstance(text, str):
+        return ""
+
+    text = unicodedata.normalize(
+        "NFKC",
+        text,
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    )
+
     return text.strip().casefold()
+
+
+def _apply_contextual_canonicalization(
+    entity_text,
+    label,
+    canonical_id,
+    detection_source,
+    clean_text,
+):
+    """Corrige entidades altamente ambiguas usando el contexto completo.
+
+    Esta capa NO sustituye al NER ni al EntityRuler.
+
+    Solo interviene cuando una forma superficial es ambigua
+    y necesita contexto para obtener tipo y canonical_id correctos.
+
+    Caso actual:
+        EVO / Evo -> Evo Morales únicamente en contexto político suficiente.
+
+    IMPORTANTE:
+        - No usa ``Evo`` como alias global case-insensitive.
+        - Permite titulares completamente en mayúsculas.
+        - Si EntityRuler ya entregó canonical_id, se respeta y no se toca.
+    """
+
+    # Si ya viene resuelto por el catálogo, no lo modificamos.
+    if canonical_id:
+        return (
+            label,
+            canonical_id,
+            detection_source,
+        )
+
+    normalized_entity = entity_key(entity_text)
+    normalized_text = entity_key(clean_text)
+
+    # ==========================================================
+    # EVO / Evo -> Evo Morales
+    # ==========================================================
+    #
+    # No usamos "Evo" como alias global porque "EVO"
+    # también podría ser una sigla en otro contexto.
+    #
+    # Sin embargo, en un contexto claramente asociado a:
+    #
+    # - Trópico
+    # - Chapare
+    # - cocaleros
+    # - dirigentes
+    # - expresidente
+    #
+    # se trata como Evo Morales.
+    # ==========================================================
+
+    if normalized_entity == "evo":
+
+        evo_context_patterns = (
+            r"\bevo\s+morales\b",
+
+            r"\b(?:ex\s*presidente|expresidente)"
+            r"\s+evo\b",
+
+            r"\bevo\b.{0,100}\btr[oó]pico\b",
+
+            r"\btr[oó]pico\b.{0,100}\bevo\b",
+
+            r"\bevo\b.{0,100}\bchapare\b",
+
+            r"\bchapare\b.{0,100}\bevo\b",
+
+            r"\bevo\b.{0,100}"
+            r"\bcocaler(?:o|os|a|as)?\b",
+
+            r"\bcocaler(?:o|os|a|as)?\b"
+            r".{0,100}\bevo\b",
+
+            r"\bevo\s+y\s+(?:los\s+)?dirigentes\b",
+
+            r"\bdirigentes\b.{0,100}\bevo\b",
+        )
+
+        if any(
+            re.search(
+                pattern,
+                normalized_text,
+                flags=re.IGNORECASE,
+            )
+            for pattern in evo_context_patterns
+        ):
+            return (
+                "PER",
+                "EVO_MORALES",
+                "contextual",
+            )
+
+    return (
+        label,
+        canonical_id,
+        detection_source,
+    )
 
 
 def _get_structural_spans(doc):
     spans = set()
+
     for match_id, start, end in _STRUCTURAL_MATCHER(doc):
-        label = _STRUCTURAL_LABELS.get(match_id)
-        spans.add((start, end, label))
+
+        label = _STRUCTURAL_LABELS.get(
+            match_id
+        )
+
+        spans.add(
+            (
+                start,
+                end,
+                label,
+            )
+        )
+
     return spans
 
 
-def _token_feature(token, attr, default=""):
+def _token_feature(
+    token,
+    attr,
+    default="",
+):
     if token is None:
         return default
-    value = getattr(token, attr, default)
-    return value if value is not None else default
+
+    value = getattr(
+        token,
+        attr,
+        default,
+    )
+
+    return (
+        value
+        if value is not None
+        else default
+    )
 
 
 def get_entities_detailed(text):
     clean_text = preprocess_text(text)
+
     if not clean_text:
-        return {"PER": [], "ORG": [], "LOC": [], "MISC": []}
+        return {
+            "PER": [],
+            "ORG": [],
+            "LOC": [],
+            "MISC": [],
+        }
 
     doc = nlp(clean_text)
-    structural_spans = _get_structural_spans(doc)
 
-    entities = {"PER": [], "ORG": [], "LOC": [], "MISC": []}
-    seen = {"PER": set(), "ORG": set(), "LOC": set(), "MISC": set()}
+    structural_spans = _get_structural_spans(
+        doc
+    )
+
+    entities = {
+        "PER": [],
+        "ORG": [],
+        "LOC": [],
+        "MISC": [],
+    }
+
+    seen = {
+        "PER": set(),
+        "ORG": set(),
+        "LOC": set(),
+        "MISC": set(),
+    }
 
     for ent in doc.ents:
-        label = ent.label_ if ent.label_ in entities else "MISC"
-        entity_text = normalize_entity(ent.text)
-        if not is_valid_entity(entity_text, label):
+
+        # ------------------------------------------------------
+        # Tipo ORIGINAL entregado por spaCy / EntityRuler
+        # ------------------------------------------------------
+
+        original_label = (
+            ent.label_
+            if ent.label_ in entities
+            else "MISC"
+        )
+
+        entity_text = normalize_entity(
+            ent.text
+        )
+
+        if not is_valid_entity(
+            entity_text,
+            original_label,
+        ):
             continue
 
-        key = entity_key(entity_text)
-        if key in seen[label]:
-            continue
-        seen[label].add(key)
+        # ------------------------------------------------------
+        # Fuente original
+        # ------------------------------------------------------
 
-        canonical_id = ent.ent_id_ or None
+        canonical_id = (
+            ent.ent_id_
+            or None
+        )
+
         if canonical_id:
+
             detection_source = "ruler"
-        elif (ent.start, ent.end, label) in structural_spans:
-            detection_source = "ruler_structural"
+
+        elif (
+            ent.start,
+            ent.end,
+            original_label,
+        ) in structural_spans:
+
+            detection_source = (
+                "ruler_structural"
+            )
+
         else:
+
             detection_source = "ner"
 
-        prev_token = doc[ent.start - 1] if ent.start > 0 else None
-        next_token = doc[ent.end] if ent.end < len(doc) else None
-        root = ent.root
-        head = root.head if root is not None else None
+        # ------------------------------------------------------
+        # Corrección contextual
+        #
+        # IMPORTANTE:
+        # esto ocurre ANTES de deduplicar.
+        #
+        # Puede cambiar:
+        #
+        # EVO ORG
+        #
+        # a:
+        #
+        # EVO PER / EVO_MORALES
+        # ------------------------------------------------------
 
-        entities[label].append({
-            "text": entity_text,
-            "label": label,
-            "canonical_id": canonical_id,
-            # Estos offsets corresponden al texto PREPROCESADO.
-            "start_char": ent.start_char,
-            "end_char": ent.end_char,
-            "detection_source": detection_source,
-            # Features lingüísticos usados solo por la capa de calidad.
-            "root_pos": _token_feature(root, "pos_"),
-            "root_lemma": _token_feature(root, "lemma_"),
-            "root_dep": _token_feature(root, "dep_"),
-            "head_pos": _token_feature(head, "pos_"),
-            "head_lemma": _token_feature(head, "lemma_"),
-            "prev_lower": _token_feature(prev_token, "lower_"),
-            "next_lower": _token_feature(next_token, "lower_"),
-            "next_lemma": _token_feature(next_token, "lemma_"),
-            "next_pos": _token_feature(next_token, "pos_"),
-            "span_pos": [token.pos_ for token in ent],
-        })
+        (
+            label,
+            canonical_id,
+            detection_source,
+        ) = _apply_contextual_canonicalization(
+            entity_text=entity_text,
+            label=original_label,
+            canonical_id=canonical_id,
+            detection_source=detection_source,
+            clean_text=clean_text,
+        )
+
+        if label not in entities:
+            label = "MISC"
+
+        # ------------------------------------------------------
+        # Deduplicación DESPUÉS de reclasificación
+        # ------------------------------------------------------
+
+        key = entity_key(
+            entity_text
+        )
+
+        if key in seen[label]:
+            continue
+
+        seen[label].add(
+            key
+        )
+
+        # ------------------------------------------------------
+        # Features lingüísticos
+        # ------------------------------------------------------
+
+        prev_token = (
+            doc[ent.start - 1]
+            if ent.start > 0
+            else None
+        )
+
+        next_token = (
+            doc[ent.end]
+            if ent.end < len(doc)
+            else None
+        )
+
+        root = ent.root
+
+        head = (
+            root.head
+            if root is not None
+            else None
+        )
+
+        # ------------------------------------------------------
+        # Resultado
+        # ------------------------------------------------------
+
+        entities[label].append(
+            {
+                "text": entity_text,
+
+                "label": label,
+
+                "canonical_id": canonical_id,
+
+                # Estos offsets corresponden
+                # al texto PREPROCESADO.
+                "start_char": ent.start_char,
+
+                "end_char": ent.end_char,
+
+                "detection_source": (
+                    detection_source
+                ),
+
+                # Features lingüísticos usados
+                # por la capa de calidad.
+                "root_pos": _token_feature(
+                    root,
+                    "pos_",
+                ),
+
+                "root_lemma": _token_feature(
+                    root,
+                    "lemma_",
+                ),
+
+                "root_dep": _token_feature(
+                    root,
+                    "dep_",
+                ),
+
+                "head_pos": _token_feature(
+                    head,
+                    "pos_",
+                ),
+
+                "head_lemma": _token_feature(
+                    head,
+                    "lemma_",
+                ),
+
+                "prev_lower": _token_feature(
+                    prev_token,
+                    "lower_",
+                ),
+
+                "next_lower": _token_feature(
+                    next_token,
+                    "lower_",
+                ),
+
+                "next_lemma": _token_feature(
+                    next_token,
+                    "lemma_",
+                ),
+
+                "next_pos": _token_feature(
+                    next_token,
+                    "pos_",
+                ),
+
+                "span_pos": [
+                    token.pos_
+                    for token in ent
+                ],
+            }
+        )
 
     return entities
 
 
 def get_entities(text):
     """Interfaz legacy: retorna listas de strings por tipo."""
-    detailed = get_entities_detailed(text)
+
+    detailed = get_entities_detailed(
+        text
+    )
+
     return {
-        label: [entity["text"] for entity in label_entities]
-        for label, label_entities in detailed.items()
+        label: [
+            entity["text"]
+            for entity in label_entities
+        ]
+        for label, label_entities
+        in detailed.items()
     }
 
 
 def get_resolvable_entities(text):
-    """Salida recomendada para alimentar resolve_entity()/tweet_entities."""
-    detailed = get_entities_detailed(text)
+    """Salida recomendada para resolve_entity()/tweet_entities."""
+
+    detailed = get_entities_detailed(
+        text
+    )
+
     return {
         label: [
             entity
             for entity in label_entities
-            if should_resolve_entity(entity, text=text)
+            if should_resolve_entity(
+                entity,
+                text=text,
+            )
         ]
-        for label, label_entities in detailed.items()
+        for label, label_entities
+        in detailed.items()
     }
 
 
 def debug_entities(text):
-    clean_text = preprocess_text(text)
-    doc = nlp(clean_text) if clean_text else None
+    """Debug: salida cruda de spaCy y salida final de NetVora."""
+
+    clean_text = preprocess_text(
+        text
+    )
+
+    doc = (
+        nlp(clean_text)
+        if clean_text
+        else None
+    )
+
     raw_entities = []
+
     if doc is not None:
-        structural_spans = _get_structural_spans(doc)
+
+        structural_spans = (
+            _get_structural_spans(
+                doc
+            )
+        )
+
         for ent in doc.ents:
+
+            raw_label = (
+                ent.label_
+                if ent.label_ in {
+                    "PER",
+                    "ORG",
+                    "LOC",
+                    "MISC",
+                }
+                else "MISC"
+            )
+
             if ent.ent_id_:
+
                 source = "ruler"
-            elif (ent.start, ent.end, ent.label_) in structural_spans:
-                source = "ruler_structural"
+
+            elif (
+                ent.start,
+                ent.end,
+                raw_label,
+            ) in structural_spans:
+
+                source = (
+                    "ruler_structural"
+                )
+
             else:
+
                 source = "ner"
-            raw_entities.append({
-                "text": ent.text,
-                "label": ent.label_,
-                "canonical_id": ent.ent_id_ or None,
-                "detection_source": source,
-                "start": ent.start_char,
-                "end": ent.end_char,
-                "root_pos": ent.root.pos_,
-                "root_lemma": ent.root.lemma_,
-            })
+
+            raw_entities.append(
+                {
+                    "text": ent.text,
+
+                    "label": ent.label_,
+
+                    "canonical_id": (
+                        ent.ent_id_
+                        or None
+                    ),
+
+                    "detection_source": (
+                        source
+                    ),
+
+                    "start": ent.start_char,
+
+                    "end": ent.end_char,
+
+                    "root_pos": (
+                        ent.root.pos_
+                    ),
+
+                    "root_lemma": (
+                        ent.root.lemma_
+                    ),
+                }
+            )
+
+    # spacy_raw conserva deliberadamente
+    # la salida cruda.
+    #
+    # final/resolvable incluyen las
+    # correcciones contextuales.
 
     return {
         "original": text,
+
         "clean": clean_text,
-        "spacy_raw": raw_entities,
-        "final": get_entities(text),
-        "resolvable": get_resolvable_entities(text),
+
+        "spacy_raw": (
+            raw_entities
+        ),
+
+        "final": (
+            get_entities(
+                text
+            )
+        ),
+
+        "resolvable": (
+            get_resolvable_entities(
+                text
+            )
+        ),
     }
 
 

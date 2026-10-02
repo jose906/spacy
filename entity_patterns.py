@@ -50,6 +50,30 @@ KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara", 'type': 'PER', 'aliase
         "Comité Cívico Pro Santa Cruz",
     ],
 },
+"EVO_MORALES": {
+    "name": "Evo Morales",
+    "type": "PER",
+    "aliases": [
+        "Evo Morales",
+        "Evo",
+    ],
+},
+
+"RODRIGO_PAZ": {
+    "name": "Rodrigo Paz",
+    "type": "PER",
+    "aliases": [
+        "Rodrigo Paz",
+    ],
+},
+
+"VIRGEN_DE_COTOCA": {
+    "name": "Virgen de Cotoca",
+    "type": "MISC",
+    "aliases": [
+        "Virgen de Cotoca",
+    ],
+},
  'COB': {'name': 'Central Obrera Boliviana', 'type': 'ORG', 'aliases': ['COB', 'Central Obrera Boliviana']},
  'CAO': {'name': 'Cámara Agropecuaria del Oriente',
          'type': 'ORG',
