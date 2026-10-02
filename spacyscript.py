@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from entity_resolver import should_resolve_entity
 import spacy
 from entity_patterns import ENTITY_PATTERNS
 
@@ -76,6 +77,10 @@ def preprocess_text(text: str) -> str:
     # --------------------------------------------------------
 
     text = unicodedata.normalize("NFKC", text)
+    # Eliminar variation selectors Unicode que pueden quedar
+    # después de emojis y pegarse al siguiente token.
+    text = text.replace("\ufe0f", "")
+    text = text.replace("\ufe0e", "")
 
     # Caracteres invisibles frecuentes
     text = text.replace("\u200b", " ")
@@ -477,42 +482,3 @@ def debug_entities(text):
         "spacy_raw": raw_entities,
         "final": get_entities(text)
     }
-
-
-
-
-from entity_resolver import should_resolve_entity
-
-tests = [
-    {
-        "text": "Luis Arce",
-        "label": "PER",
-        "canonical_id": None,
-        "detection_source": "ner",
-    },
-    {
-        "text": "COB",
-        "label": "ORG",
-        "canonical_id": "COB",
-        "detection_source": "ruler",
-    },
-    {
-        "text": "PTAR",
-        "label": "LOC",
-        "canonical_id": None,
-        "detection_source": "ner",
-    },
-    {
-        "text": "Ramos y Arce",
-        "label": "PER",
-        "canonical_id": None,
-        "detection_source": "ner",
-    },
-]
-
-for entity in tests:
-    print(
-        entity["text"],
-        "=>",
-        should_resolve_entity(entity)
-    )

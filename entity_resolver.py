@@ -309,6 +309,22 @@ def should_resolve_entity(entity, text=None):
 
         if normalized in technical_acronyms:
             return False
+    # ---------------------------------------------------------
+    # LOC que en realidad son nombres de eventos
+    # ---------------------------------------------------------
+    if entity_type == "LOC" and detection_source == "ner":
+
+        event_prefixes = {
+            "festival",
+            "feria",
+            "congreso",
+            "encuentro",
+        }
+
+        first_word = normalized.split()[0] if normalized else ""
+
+        if first_word in event_prefixes:
+            return False
 
     # -----------------------------------------------------
     # 5. MISC detectado solamente por el NER

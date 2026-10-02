@@ -96,6 +96,15 @@ GENERIC_ENTITY_PHRASES = {
 
 KNOWN_ENTITIES = {
     
+    "TIKITA_WARA": {
+    "name": "T'ikita Wara",
+    "type": "PER",
+    "aliases": [
+        "T'ikita Wara",
+        "T’ikita Wara",
+    ],
+},
+    
         "COB": {
         "name": "Central Obrera Boliviana",
         "type": "ORG",
