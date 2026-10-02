@@ -20,6 +20,31 @@ from entity_resolver import should_resolve_entity
 MODEL_NAME = os.environ.get("NETVORA_SPACY_MODEL", "es_core_news_lg")
 
 
+def _known_patterns_as_token_patterns(nlp_obj):
+    """Convierte frases del catálogo a token patterns case-insensitive.
+
+    Esto evita que EntityRuler tenga que procesar cada frase por el pipeline
+    completo al iniciar y elimina el warning W012 asociado al PhraseMatcher.
+    La tokenización la hace el tokenizer real del modelo con ``make_doc``.
+    """
+    converted = []
+    for item in KNOWN_ENTITY_PATTERNS:
+        pattern = item.get("pattern")
+        if isinstance(pattern, str):
+            doc = nlp_obj.make_doc(pattern)
+            if not doc:
+                continue
+            token_pattern = [{"LOWER": token.lower_} for token in doc]
+            converted.append({
+                "label": item["label"],
+                "pattern": token_pattern,
+                "id": item.get("id"),
+            })
+        else:
+            converted.append(dict(item))
+    return converted
+
+
 def _build_nlp(model_name=MODEL_NAME):
     try:
         nlp_obj = spacy.load(model_name)
@@ -51,17 +76,14 @@ def _build_nlp(model_name=MODEL_NAME):
 
     # 2) Catálogo conocido al final: si una regla exacta coincide, gana sobre
     # NER y sobre reglas estructurales, y conserva ent_id_ canónico.
+    # Usamos token patterns LOWER para evitar W012 y carga innecesaria.
     known_ruler = nlp_obj.add_pipe(
         "entity_ruler",
         name="netvora_known_ruler",
         after="netvora_structural_ruler",
-        config={
-            "overwrite_ents": True,
-            "phrase_matcher_attr": "LOWER",
-            "validate": True,
-        },
+        config={"overwrite_ents": True, "validate": True},
     )
-    known_ruler.add_patterns(KNOWN_ENTITY_PATTERNS)
+    known_ruler.add_patterns(_known_patterns_as_token_patterns(nlp_obj))
     return nlp_obj
 
 
@@ -103,11 +125,41 @@ def split_camel_case(value):
 
 
 def replace_hashtag(match):
+    # Conservamos el contenido semántico de hashtags.
     return split_camel_case(match.group(1)) + ". "
 
 
 def replace_mention(match):
-    return split_camel_case(match.group(1)) + ". "
+    # Los handles NO se convierten en texto para NER.
+    # @correodelsurcom no debe transformarse en una falsa LOC/ORG/PER.
+    return " "
+
+
+def _remove_editorial_credits(text):
+    """Elimina créditos fotográficos/editoriales que no son contenido NER."""
+    # 📸APG / 📷 APG / 📸 Juan Perez
+    # Crédito fotográfico compacto:
+    # 📸APG -> eliminado
+    # 📷 ABI -> eliminado
+    # pero NO consume el texto que viene después.
+
+    text = re.sub(
+        r'(?:📸|📷)\s*'
+        r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.-]{2,30}'
+        r'(?=\s|$)',
+        ' ',
+        text
+    )
+
+    # Foto: APG / Crédito: Juan Pérez / Fotografía - APG Noticias
+    text = re.sub(
+        r"(?i)\b(?:foto|fotograf[ií]a|cr[eé]dito)\s*[:\-]\s*"
+        r"[A-ZÁÉÍÓÚÜÑ0-9][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.\-']{1,30}"
+        r"(?:\s+[A-ZÁÉÍÓÚÜÑ0-9][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.\-']{1,30}){0,3}",
+        " ",
+        text,
+    )
+    return text
 
 
 def preprocess_text(text):
@@ -127,7 +179,10 @@ def preprocess_text(text):
     # URLs completas o www.*
     text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)
 
-    # Conservamos semántica de mentions/hashtags, pero los aislamos con punto.
+    # Créditos editoriales antes de limpiar emojis.
+    text = _remove_editorial_credits(text)
+
+    # Mentions se eliminan; hashtags conservan contenido semántico.
     text = re.sub(
         r"@([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)",
         replace_mention,
@@ -146,12 +201,13 @@ def preprocess_text(text):
         r"(?i)\blea\s+m[aá]s\b\s*:?\s*",
         r"(?i)\blee\s+m[aá]s\b\s*:?\s*",
         r"(?i)\bm[aá]s\s+informaci[oó]n\b\s*:?\s*",
+        r"(?i)\bmant[eé]ngase\s+informado\b\s*:?\s*",
     )
     for pattern in patterns_remove:
         text = re.sub(pattern, " ", text)
 
     text = re.sub(
-        r"[★☆◆◉▪🔴🔵🟢🟡🟠🟣🟤⚫⚪🟥🟦🟩🟨🟧🟪✅✔✳🔹🔸▶🔻🔺📷📹🎥]+",
+        r"[★☆◆◉▪🔴🔵🟢🟡🟠🟣🟤⚫⚪🟥🟦🟩🟨🟧🟪✅✔✳🔹🔸▶🔻🔺📌📷📸📹🎥]+",
         " ",
         text,
     )
@@ -218,6 +274,13 @@ def _get_structural_spans(doc):
     return spans
 
 
+def _token_feature(token, attr, default=""):
+    if token is None:
+        return default
+    value = getattr(token, attr, default)
+    return value if value is not None else default
+
+
 def get_entities_detailed(text):
     clean_text = preprocess_text(text)
     if not clean_text:
@@ -248,6 +311,11 @@ def get_entities_detailed(text):
         else:
             detection_source = "ner"
 
+        prev_token = doc[ent.start - 1] if ent.start > 0 else None
+        next_token = doc[ent.end] if ent.end < len(doc) else None
+        root = ent.root
+        head = root.head if root is not None else None
+
         entities[label].append({
             "text": entity_text,
             "label": label,
@@ -256,6 +324,17 @@ def get_entities_detailed(text):
             "start_char": ent.start_char,
             "end_char": ent.end_char,
             "detection_source": detection_source,
+            # Features lingüísticos usados solo por la capa de calidad.
+            "root_pos": _token_feature(root, "pos_"),
+            "root_lemma": _token_feature(root, "lemma_"),
+            "root_dep": _token_feature(root, "dep_"),
+            "head_pos": _token_feature(head, "pos_"),
+            "head_lemma": _token_feature(head, "lemma_"),
+            "prev_lower": _token_feature(prev_token, "lower_"),
+            "next_lower": _token_feature(next_token, "lower_"),
+            "next_lemma": _token_feature(next_token, "lemma_"),
+            "next_pos": _token_feature(next_token, "pos_"),
+            "span_pos": [token.pos_ for token in ent],
         })
 
     return entities
@@ -288,13 +367,23 @@ def debug_entities(text):
     doc = nlp(clean_text) if clean_text else None
     raw_entities = []
     if doc is not None:
+        structural_spans = _get_structural_spans(doc)
         for ent in doc.ents:
+            if ent.ent_id_:
+                source = "ruler"
+            elif (ent.start, ent.end, ent.label_) in structural_spans:
+                source = "ruler_structural"
+            else:
+                source = "ner"
             raw_entities.append({
                 "text": ent.text,
                 "label": ent.label_,
                 "canonical_id": ent.ent_id_ or None,
+                "detection_source": source,
                 "start": ent.start_char,
                 "end": ent.end_char,
+                "root_pos": ent.root.pos_,
+                "root_lemma": ent.root.lemma_,
             })
 
     return {

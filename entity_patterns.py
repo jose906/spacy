@@ -12,8 +12,7 @@ import unicodedata
 VALID_ENTITY_TYPES = {"PER", "ORG", "LOC", "MISC"}
 
 # Términos que nunca deben convertirse por sí solos en entidades normalizadas.
-# Se guardan ya normalizados (minúsculas y sin acentos), porque
-# entity_resolver.normalize_alias() trabaja así.
+# Se guardan normalizados porque entity_resolver.normalize_alias() trabaja así.
 ENTITY_STOPLIST = {
     "el", "la", "los", "las",
     "un", "una", "unos", "unas",
@@ -27,18 +26,14 @@ GENERIC_ENTITY_PHRASES = {
     "jefe de estado",
     "la informacion",
     "informacion",
-    # Falsos positivos observados en el dataset de NetVora.
+    # Falsos positivos observados repetidamente en el dataset de NetVora.
     "gobierno",
     "politica",
 }
 
 
-KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara",
-                 'type': 'PER',
-                 'aliases': ["T'ikita Wara", 'T’ikita Wara']},
- 'COB': {'name': 'Central Obrera Boliviana',
-         'type': 'ORG',
-         'aliases': ['COB', 'Central Obrera Boliviana']},
+KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara", 'type': 'PER', 'aliases': ["T'ikita Wara", 'T’ikita Wara']},
+ 'COB': {'name': 'Central Obrera Boliviana', 'type': 'ORG', 'aliases': ['COB', 'Central Obrera Boliviana']},
  'CAO': {'name': 'Cámara Agropecuaria del Oriente',
          'type': 'ORG',
          'aliases': ['CAO', 'Cámara Agropecuaria del Oriente']},
@@ -47,9 +42,7 @@ KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara",
            'aliases': ['FELCC', 'Fuerza Especial de Lucha Contra el Crimen']},
  'ATT': {'name': 'Autoridad de Regulación y Fiscalización de Telecomunicaciones y Transportes',
          'type': 'ORG',
-         'aliases': ['ATT',
-                     'Autoridad de Regulación y Fiscalización de Telecomunicaciones y '
-                     'Transportes']},
+         'aliases': ['ATT', 'Autoridad de Regulación y Fiscalización de Telecomunicaciones y Transportes']},
  'ASFI': {'name': 'Autoridad de Supervisión del Sistema Financiero',
           'type': 'ORG',
           'aliases': ['ASFI', 'Autoridad de Supervisión del Sistema Financiero']},
@@ -57,23 +50,19 @@ KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara",
            'type': 'ORG',
            'aliases': ['UAGRM', 'Universidad Autónoma Gabriel René Moreno']},
  'TOYOSA': {'name': 'Toyosa', 'type': 'ORG', 'aliases': ['Toyosa']},
- 'ORGANO_JUDICIAL_BOLIVIA': {'name': 'Órgano Judicial',
-                             'type': 'ORG',
-                             'aliases': ['Órgano Judicial']},
+ 'ORGANO_JUDICIAL_BOLIVIA': {'name': 'Órgano Judicial', 'type': 'ORG', 'aliases': ['Órgano Judicial']},
  'CONFEDERACION_AGROPECUARIA_NACIONAL': {'name': 'Confederación Agropecuaria Nacional',
                                          'type': 'ORG',
-                                         'aliases': ['CONFEAGRO',
-                                                     'Confederación Agropecuaria Nacional']},
+                                         'aliases': ['CONFEAGRO', 'Confederación Agropecuaria Nacional']},
  'AGENCIA_NOTICIAS_FIDES': {'name': 'Agencia de Noticias Fides',
                             'type': 'ORG',
                             'aliases': ['ANF', 'Agencia de Noticias Fides']},
  'GRUPO_FIDES': {'name': 'Grupo Fides', 'type': 'ORG', 'aliases': ['GrupoFides', 'Grupo Fides']},
- 'CONFEDERACION_EMPRESARIOS_PRIVADOS_BOLIVIA': {'name': 'Confederación de Empresarios Privados de '
-                                                        'Bolivia',
+ 'CONFEDERACION_EMPRESARIOS_PRIVADOS_BOLIVIA': {'name': 'Confederación de Empresarios Privados de Bolivia',
                                                 'type': 'ORG',
                                                 'aliases': ['CEPB',
-                                                            'Confederación de Empresarios Privados '
-                                                            'de Bolivia']},
+                                                            'Confederación de Empresarios Privados de '
+                                                            'Bolivia']},
  'PARTIDO_DEMOCRATA_CRISTIANO': {'name': 'Partido Demócrata Cristiano',
                                  'type': 'ORG',
                                  'aliases': ['PDC', 'Partido Demócrata Cristiano']},
@@ -92,12 +81,8 @@ KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara",
  'ASAMBLEA_LEGISLATIVA_PLURINACIONAL': {'name': 'Asamblea Legislativa Plurinacional',
                                         'type': 'ORG',
                                         'aliases': ['ALP', 'Asamblea Legislativa Plurinacional']},
- 'CAMARA_DIPUTADOS': {'name': 'Cámara de Diputados',
-                      'type': 'ORG',
-                      'aliases': ['Cámara de Diputados']},
- 'CAMARA_SENADORES': {'name': 'Cámara de Senadores',
-                      'type': 'ORG',
-                      'aliases': ['Cámara de Senadores']},
+ 'CAMARA_DIPUTADOS': {'name': 'Cámara de Diputados', 'type': 'ORG', 'aliases': ['Cámara de Diputados']},
+ 'CAMARA_SENADORES': {'name': 'Cámara de Senadores', 'type': 'ORG', 'aliases': ['Cámara de Senadores']},
  'SENAMHI': {'name': 'Servicio Nacional de Meteorología e Hidrología',
              'type': 'ORG',
              'aliases': ['SENAMHI', 'Senamhi', 'Servicio Nacional de Meteorología e Hidrología']},
@@ -106,8 +91,7 @@ KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara",
            'aliases': ['EMAPA', 'Empresa de Apoyo a la Producción de Alimentos']},
  'ADMINISTRADORA_BOLIVIANA_CARRETERAS': {'name': 'Administradora Boliviana de Carreteras',
                                          'type': 'ORG',
-                                         'aliases': ['ABC',
-                                                     'Administradora Boliviana de Carreteras']},
+                                         'aliases': ['ABC', 'Administradora Boliviana de Carreteras']},
  'AGENCIA_NACIONAL_HIDROCARBUROS': {'name': 'Agencia Nacional de Hidrocarburos',
                                     'type': 'ORG',
                                     'aliases': ['ANH', 'Agencia Nacional de Hidrocarburos']},
@@ -117,29 +101,39 @@ KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara",
  'SEGIP': {'name': 'SEGIP', 'type': 'ORG', 'aliases': ['SEGIP']},
  'AGETIC': {'name': 'AGETIC', 'type': 'ORG', 'aliases': ['AGETIC']},
  'ADUANA_NACIONAL': {'name': 'Aduana Nacional', 'type': 'ORG', 'aliases': ['Aduana Nacional']},
- 'POLICIA_BOLIVIANA': {'name': 'Policía Boliviana',
-                       'type': 'ORG',
-                       'aliases': ['Policía Boliviana']},
- 'FUERZAS_ARMADAS_BOLIVIA': {'name': 'Fuerzas Armadas',
-                             'type': 'ORG',
-                             'aliases': ['Fuerzas Armadas']},
+ 'POLICIA_BOLIVIANA': {'name': 'Policía Boliviana', 'type': 'ORG', 'aliases': ['Policía Boliviana']},
+ 'FUERZAS_ARMADAS_BOLIVIA': {'name': 'Fuerzas Armadas', 'type': 'ORG', 'aliases': ['Fuerzas Armadas']},
  'TRIBUNAL_CONSTITUCIONAL_PLURINACIONAL': {'name': 'Tribunal Constitucional Plurinacional',
                                            'type': 'ORG',
-                                           'aliases': ['TCP',
-                                                       'Tribunal Constitucional Plurinacional']},
+                                           'aliases': ['TCP', 'Tribunal Constitucional Plurinacional']},
  'TRIBUNAL_SUPREMO_JUSTICIA': {'name': 'Tribunal Supremo de Justicia',
                                'type': 'ORG',
                                'aliases': ['TSJ', 'Tribunal Supremo de Justicia']},
  'FISCALIA_GENERAL_ESTADO': {'name': 'Fiscalía General del Estado',
                              'type': 'ORG',
                              'aliases': ['Fiscalía General del Estado']},
- 'CONCEJO_MUNICIPAL': {'name': 'Concejo Municipal',
-                       'type': 'ORG',
-                       'aliases': ['Concejo Municipal']},
+ 'CONCEJO_MUNICIPAL': {'name': 'Concejo Municipal', 'type': 'ORG', 'aliases': ['Concejo Municipal']},
  'MINISTERIO_PRESIDENCIA_BOLIVIA': {'name': 'Ministerio de la Presidencia',
                                     'type': 'ORG',
-                                    'aliases': ['Ministerio de la Presidencia']}}
-
+                                    'aliases': ['Ministerio de la Presidencia']},
+ 'FESIRMES': {'name': 'Federación de Sindicatos de Ramas Médicas de Salud Pública',
+              'type': 'ORG',
+              'aliases': ['FESIRMES',
+                          'Fesirmes',
+                          'Federación de Sindicatos de Ramas Médicas de Salud Pública',
+                          'Federación de Profesionales en Salud',
+                          'Federación Sindical de Ramas Médicas']},
+ 'VISION_360': {'name': 'Visión 360',
+                'type': 'ORG',
+                'aliases': ['Visión 360', 'Visión360', 'Vision 360', 'Vision360']},
+ 'APG_NOTICIAS': {'name': 'Agencia de Noticias APG',
+                  'type': 'ORG',
+                  'aliases': ['APG',
+                              'APG Noticias',
+                              'Agencia de Noticias APG',
+                              'Agencia de Periodistas Gráficos',
+                              'Agencia de Prensa Gráfica']},
+ 'MARIOLY_VALENCIA': {'name': 'Marioly Valencia', 'type': 'PER', 'aliases': ['Marioly Valencia']}}
 
 
 def _strip_diacritics(text):
@@ -155,7 +149,6 @@ def _alias_variants(alias):
     if accentless != alias:
         variants.append(accentless)
 
-    # Unifica apóstrofes frecuentes, conservando también la forma original.
     straight = alias.replace("’", "'").replace("‘", "'").replace("`", "'")
     if straight not in variants:
         variants.append(straight)
@@ -199,6 +192,8 @@ ENTITY_CATALOG = {
 
 
 # Frases conocidas: el mismo id une sigla, nombre largo y variantes sin tildes.
+# spacyscript.py las convierte a token patterns con LOWER usando nlp.make_doc().
+# Así evitamos pasar las frases por todo el pipeline al iniciar EntityRuler.
 KNOWN_ENTITY_PATTERNS = []
 _seen_known_patterns = set()
 for external_key, data in KNOWN_ENTITIES.items():
@@ -324,7 +319,8 @@ STRUCTURAL_PATTERNS = [
 ]
 
 
-# Compatibilidad con código anterior.
+# Compatibilidad con código anterior. Para el EntityRuler de NetVora se usa
+# KNOWN_ENTITY_PATTERNS por separado para que el catálogo exacto tenga prioridad.
 ENTITY_PATTERNS = STRUCTURAL_PATTERNS + KNOWN_ENTITY_PATTERNS
 
 __all__ = [

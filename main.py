@@ -172,6 +172,8 @@ def prueba():
         cursor.close()
         conexion.close()
     return jsonify({"status": "completed"}), 200
+
+
     
 @app.route("/spacy_entities_v2", methods=["GET"])
 def spacy_entities_v2():

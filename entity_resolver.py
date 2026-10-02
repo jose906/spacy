@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Resolución y filtros de entidades para NetVora.
 
-Este módulo protege las tablas normalizadas ``entities``, ``entity_aliases``
-y ``tweet_entities`` sin cambiar la salida legacy de ``get_entities()``.
+Protege las tablas normalizadas ``entities``, ``entity_aliases`` y
+``tweet_entities`` sin cambiar la salida legacy de ``get_entities()``.
 Compatible con Python 3.8+.
 """
 
@@ -17,6 +17,19 @@ from entity_patterns import (
 
 
 VALID_ENTITY_TYPES = {"PER", "ORG", "LOC", "MISC"}
+
+# POS que jamás deben crear por sí solos una persona de una palabra cuando la
+# detección proviene únicamente del NER estadístico.
+_NON_PERSON_SINGLE_TOKEN_POS = {
+    "VERB", "AUX", "ADJ", "ADV", "DET", "PRON", "ADP", "CCONJ",
+    "SCONJ", "NUM", "PUNCT", "SYM", "INTJ",
+}
+
+_ROLE_PORTFOLIO_PREFIXES = (
+    "ministro", "ministra", "viceministro", "viceministra",
+    "secretario", "secretaria", "director", "directora",
+    "titular", "responsable",
+)
 
 
 def normalize_alias(text):
@@ -51,6 +64,52 @@ def _row_get(row, key, index=0, default=None):
         return row[index]
     except (IndexError, TypeError):
         return default
+
+
+def _safe_float(value, default):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _confidence_for_source(source):
+    """Confianza semántica del origen, no probabilidad del modelo spaCy."""
+    if source in {"ruler", "manual", "catalog"}:
+        return 1.0
+    if source == "ruler_structural":
+        return 0.95
+    if source == "ner":
+        return 0.80
+    return 0.75
+
+
+def _confidence_for_existing_alias(alias_source, stored_confidence):
+    """No convierte un alias NER antiguo en 1.0 solo por repetirse."""
+    base = _confidence_for_source(alias_source)
+    stored = _safe_float(stored_confidence, base)
+
+    if alias_source in {"ruler", "manual", "catalog"}:
+        return 1.0
+    if alias_source == "ruler_structural":
+        return min(max(stored, 0.0), 0.95)
+    if alias_source == "ner":
+        return min(max(stored, 0.0), 0.80)
+    return min(max(stored, 0.0), 1.0)
+
+
+def _looks_like_role_portfolio(normalized_mention, normalized_text):
+    """Detecta falsos PER como 'Desarrollo Productivo' en 'ministro de ...'."""
+    if not normalized_mention or not normalized_text:
+        return False
+
+    role_group = "(?:%s)" % "|".join(map(re.escape, _ROLE_PORTFOLIO_PREFIXES))
+    connector = r"(?:de|del|de la|de los|de las)"
+    pattern = (
+        r"\b" + role_group + r"\s+" + connector + r"\s+" +
+        re.escape(normalized_mention) + r"\b"
+    )
+    return re.search(pattern, normalized_text) is not None
 
 
 def should_resolve_entity(entity, text=None):
@@ -109,7 +168,6 @@ def should_resolve_entity(entity, text=None):
                 return False
 
         # Dos personas coordinadas no deben convertirse en una sola persona.
-        # No se aplica a LOC porque existen ubicaciones reales con "y/e".
         if entity_type == "PER" and re.fullmatch(
             r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]+\s+(?:y|e)\s+"
             r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]+",
@@ -118,10 +176,29 @@ def should_resolve_entity(entity, text=None):
         ):
             return False
 
+        if entity_type == "PER":
+            words = normalized.split()
+            root_pos = (entity.get("root_pos") or "").upper()
+
+            # Evita Afectaron -> PER, Señala -> PER, etc. sin bloquear Evo,
+            # Morales u otros nombres de una palabra marcados como PROPN.
+            if len(words) == 1 and root_pos in _NON_PERSON_SINGLE_TOKEN_POS:
+                return False
+
+            # Evita 'Desarrollo Productivo' -> PER cuando forma parte de una
+            # cartera/cargo: 'ministro de Desarrollo Productivo'.
+            if isinstance(text, str) and text:
+                normalized_text = normalize_alias(text)
+                if _looks_like_role_portfolio(normalized, normalized_text):
+                    return False
+
     if isinstance(text, str) and text:
         normalized_text = normalize_alias(text)
         if entity_type == "LOC" and normalized in {"buenos", "buenas"}:
-            if re.search(r"\bbuenos dias\b|\bbuenas tardes\b|\bbuenas noches\b", normalized_text):
+            if re.search(
+                r"\bbuenos dias\b|\bbuenas tardes\b|\bbuenas noches\b",
+                normalized_text,
+            ):
                 return False
 
     editorial_patterns = (
@@ -139,9 +216,6 @@ def should_resolve_entity(entity, text=None):
 def resolve_entity(cursor, entity, text=None):
     """Resuelve una detección a ``entities.id``.
 
-    Es retrocompatible con ``resolve_entity(cursor, entity)``; el argumento
-    opcional ``text`` mejora los filtros contextuales.
-
     Retorna ``None`` cuando la detección no debe persistirse o cuando existe
     ambigüedad, o un dict con ``entity_id``, ``resolution_source`` y
     ``confidence``.
@@ -152,6 +226,7 @@ def resolve_entity(cursor, entity, text=None):
     mention = entity["text"].strip()
     entity_type = entity["label"]
     canonical_id = entity.get("canonical_id")
+    detection_source = entity.get("detection_source", "ner")
     normalized = normalize_alias(mention)
 
     # 1) Entidades explícitas del EntityRuler / catálogo.
@@ -205,8 +280,48 @@ def resolve_entity(cursor, entity, text=None):
         canonical_name = catalog_entry["name"] if catalog_entry else mention
         canonical_type = catalog_entry["type"] if catalog_entry else entity_type
 
-        # external_key debe ser UNIQUE. LAST_INSERT_ID(id) hace el alta idempotente
-        # si dos workers intentan crear la misma entidad conocida a la vez.
+        # Antes de crear otra fila, intentamos PROMOVER una entidad legacy que
+        # ya tenga exactamente este alias y tipo pero todavía no external_key.
+        # Esto evita duplicados al incorporar al catálogo una entidad que antes
+        # fue descubierta por NER/ruler_structural (ej. FESIRMES).
+        cursor.execute(
+            """
+            SELECT e.id, e.external_key
+            FROM entity_aliases ea
+            INNER JOIN entities e ON e.id = ea.entity_id
+            WHERE ea.normalized_alias = %s
+              AND e.entity_type = %s
+              AND e.status = 'active'
+            LIMIT 2
+            """,
+            (normalized, canonical_type),
+        )
+        legacy_rows = cursor.fetchall() or []
+
+        if len(legacy_rows) == 1:
+            legacy_id = _row_get(legacy_rows[0], "id", 0)
+            legacy_key = _row_get(legacy_rows[0], "external_key", 1, None)
+            if legacy_id and not legacy_key:
+                cursor.execute(
+                    """
+                    UPDATE entities
+                    SET canonical_name = %s,
+                        entity_type = %s,
+                        external_key = %s
+                    WHERE id = %s
+                      AND external_key IS NULL
+                    """,
+                    (canonical_name, canonical_type, canonical_id, legacy_id),
+                )
+                _ensure_alias(cursor, legacy_id, mention, normalized, "ruler", 1.0)
+                return {
+                    "entity_id": legacy_id,
+                    "resolution_source": "ruler_promoted",
+                    "confidence": 1.0,
+                }
+
+        # external_key debe ser UNIQUE. LAST_INSERT_ID(id) hace el alta
+        # idempotente si dos workers crean la misma entidad conocida a la vez.
         cursor.execute(
             """
             INSERT INTO entities (canonical_name, entity_type, external_key)
@@ -235,11 +350,14 @@ def resolve_entity(cursor, entity, text=None):
             "confidence": 1.0,
         }
 
-    # 2) Alias exacto, pero solo dentro del mismo tipo para no fusionar
-    # homónimos como persona/lugar/organización.
+    # 2) Alias exacto dentro del mismo tipo para no fusionar homónimos entre
+    # persona/lugar/organización. Conservamos el origen/confianza del alias.
     cursor.execute(
         """
-        SELECT e.id
+        SELECT
+            e.id,
+            ea.source AS alias_source,
+            ea.confidence AS alias_confidence
         FROM entity_aliases ea
         INNER JOIN entities e ON e.id = ea.entity_id
         WHERE ea.normalized_alias = %s
@@ -252,10 +370,16 @@ def resolve_entity(cursor, entity, text=None):
     rows = cursor.fetchall() or []
 
     if len(rows) == 1:
+        row = rows[0]
+        alias_source = _row_get(row, "alias_source", 1, "ner")
+        alias_confidence = _row_get(row, "alias_confidence", 2, None)
         return {
-            "entity_id": _row_get(rows[0], "id", 0),
+            "entity_id": _row_get(row, "id", 0),
             "resolution_source": "exact_alias",
-            "confidence": 1.0,
+            "confidence": _confidence_for_existing_alias(
+                alias_source,
+                alias_confidence,
+            ),
         }
     if len(rows) > 1:
         return None
@@ -272,11 +396,25 @@ def resolve_entity(cursor, entity, text=None):
     if not entity_id:
         raise RuntimeError("INSERT de entidad nueva no devolvió lastrowid")
 
-    _ensure_alias(cursor, entity_id, mention, normalized, "ner", 1.0)
+    confidence = _confidence_for_source(detection_source)
+    alias_source = (
+        detection_source
+        if detection_source in {"ner", "ruler_structural", "ruler"}
+        else "ner"
+    )
+
+    _ensure_alias(
+        cursor,
+        entity_id,
+        mention,
+        normalized,
+        alias_source,
+        confidence,
+    )
     return {
         "entity_id": entity_id,
         "resolution_source": "new",
-        "confidence": 1.0,
+        "confidence": confidence,
     }
 
 
