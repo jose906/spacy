@@ -125,8 +125,20 @@ def split_camel_case(value):
 
 
 def replace_hashtag(match):
-    # Conservamos el contenido semántico de hashtags.
-    return split_camel_case(match.group(1)) + ". "
+    hashtag = match.group(1)
+    hashtag = split_camel_case(hashtag)
+
+    # Aislamos el hashtag por ambos lados.
+    #
+    # "Senasag #Economía"
+    # -> "Senasag. Economía."
+    #
+    # "#GrupoFides #ANF #Sucre"
+    # -> ". Grupo Fides. . ANF. . Sucre."
+    #
+    # Evita que spaCy fusione la palabra anterior
+    # con el contenido del hashtag.
+    return ". " + hashtag + ". "
 
 
 def replace_mention(match):
@@ -181,6 +193,8 @@ def preprocess_text(text):
 
     # Créditos editoriales antes de limpiar emojis.
     text = _remove_editorial_credits(text)
+    text = re.sub(r'(?:\.\s*){2,}', '. ', text)
+
 
     # Mentions se eliminan; hashtags conservan contenido semántico.
     text = re.sub(

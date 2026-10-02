@@ -33,6 +33,23 @@ GENERIC_ENTITY_PHRASES = {
 
 
 KNOWN_ENTITIES = {'TIKITA_WARA': {'name': "T'ikita Wara", 'type': 'PER', 'aliases': ["T'ikita Wara", 'T’ikita Wara']},
+                  "SENASAG": {
+    "name": "Servicio Nacional de Sanidad Agropecuaria e Inocuidad Alimentaria",
+    "type": "ORG",
+    "aliases": [
+        "SENASAG",
+        "Senasag",
+        "Servicio Nacional de Sanidad Agropecuaria e Inocuidad Alimentaria",
+    ],
+},"COMITE_PRO_SANTA_CRUZ": {
+    "name": "Comité pro Santa Cruz",
+    "type": "ORG",
+    "aliases": [
+        "Comité pro Santa Cruz",
+        "Comité Cívico pro Santa Cruz",
+        "Comité Cívico Pro Santa Cruz",
+    ],
+},
  'COB': {'name': 'Central Obrera Boliviana', 'type': 'ORG', 'aliases': ['COB', 'Central Obrera Boliviana']},
  'CAO': {'name': 'Cámara Agropecuaria del Oriente',
          'type': 'ORG',
