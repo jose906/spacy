@@ -1,10 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Extracción NER de NetVora.
 
-Conserva la interfaz legacy ``get_entities(text)`` y agrega una salida detallada
-más una salida filtrada para el resolver normalizado.
-Compatible con Python 3.8+ y spaCy 3.x.
-"""
 
 import os
 import re
@@ -15,6 +10,7 @@ from spacy.matcher import Matcher
 
 from entity_patterns import KNOWN_ENTITY_PATTERNS, STRUCTURAL_PATTERNS
 from entity_resolver import should_resolve_entity
+from ner_gliner import extract_gliner_entities
 
 
 MODEL_NAME = os.environ.get("NETVORA_SPACY_MODEL", "es_core_news_lg")
@@ -571,6 +567,359 @@ def _token_feature(
         else default
     )
 
+
+def _gliner_to_spacy_span(doc, entity):
+    """Convierte una entidad GLiNER en un Span de spaCy."""
+
+    span = doc.char_span(
+        entity["start_char"],
+        entity["end_char"],
+        alignment_mode="expand",
+    )
+
+    return span
+def _get_gliner_entities_detailed(doc, clean_text):
+
+    predictions = extract_gliner_entities(clean_text)
+
+    entities = []
+
+    for prediction in predictions:
+
+        span = _gliner_to_spacy_span(
+            doc,
+            prediction,
+        )
+
+        if span is None:
+            continue
+
+        root = span.root
+
+        head = root.head if root is not None else None
+
+        prev_token = (
+            doc[span.start - 1]
+            if span.start > 0
+            else None
+        )
+
+        next_token = (
+            doc[span.end]
+            if span.end < len(doc)
+            else None
+        )
+
+        entities.append({
+            "text": normalize_entity(
+                prediction["text"]
+            ),
+
+            "label": prediction["label"],
+
+            "canonical_id": None,
+
+            "start_char": prediction["start_char"],
+
+            "end_char": prediction["end_char"],
+
+            "detection_source": "ner",
+
+            "ner_model": "gliner",
+
+            "model_confidence": prediction["model_confidence"],
+
+            "root_pos": _token_feature(
+                root,
+                "pos_",
+            ),
+
+            "root_lemma": _token_feature(
+                root,
+                "lemma_",
+            ),
+
+            "root_dep": _token_feature(
+                root,
+                "dep_",
+            ),
+
+            "head_pos": _token_feature(
+                head,
+                "pos_",
+            ),
+
+            "head_lemma": _token_feature(
+                head,
+                "lemma_",
+            ),
+
+            "prev_lower": _token_feature(
+                prev_token,
+                "lower_",
+            ),
+
+            "next_lower": _token_feature(
+                next_token,
+                "lower_",
+            ),
+
+            "next_lemma": _token_feature(
+                next_token,
+                "lemma_",
+            ),
+
+            "next_pos": _token_feature(
+                next_token,
+                "pos_",
+            ),
+
+            "span_pos": [
+                token.pos_
+                for token in span
+            ],
+        })
+
+    return entities
+
+
+def _merge_gliner_with_rules(gliner_entities, rule_doc):
+    """
+    Fusiona GLiNER con EntityRuler.
+    Si una regla se solapa con GLiNER, gana la regla.
+    """
+
+    rule_entities = []
+
+    for ent in rule_doc.ents:
+        rule_entities.append({
+            "text": ent.text,
+            "label": ent.label_,
+            "start_char": ent.start_char,
+            "end_char": ent.end_char,
+            "canonical_id": ent.ent_id_ or None,
+            "detection_source": (
+                "ruler"
+                if ent.ent_id_
+                else "ruler_structural"
+            ),
+        })
+
+    merged = list(rule_entities)
+
+    for entity in gliner_entities:
+
+        overlaps_rule = any(
+            entity["start_char"] < rule["end_char"]
+            and entity["end_char"] > rule["start_char"]
+            for rule in rule_entities
+        )
+
+        if not overlaps_rule:
+            merged.append(entity)
+
+    return merged
+
+def _enrich_merged_entities(doc, entities):
+
+    result = []
+
+    for entity in entities:
+
+        span = doc.char_span(
+            entity["start_char"],
+            entity["end_char"],
+            alignment_mode="expand",
+        )
+
+        if span is None:
+            continue
+
+        root = span.root
+        head = root.head if root is not None else None
+
+        prev_token = (
+            doc[span.start - 1]
+            if span.start > 0
+            else None
+        )
+
+        next_token = (
+            doc[span.end]
+            if span.end < len(doc)
+            else None
+        )
+
+        enriched = dict(entity)
+
+        enriched.update({
+            "root_pos": _token_feature(root, "pos_"),
+            "root_lemma": _token_feature(root, "lemma_"),
+            "root_dep": _token_feature(root, "dep_"),
+            "head_pos": _token_feature(head, "pos_"),
+            "head_lemma": _token_feature(head, "lemma_"),
+            "prev_lower": _token_feature(prev_token, "lower_"),
+            "next_lower": _token_feature(next_token, "lower_"),
+            "next_lemma": _token_feature(next_token, "lemma_"),
+            "next_pos": _token_feature(next_token, "pos_"),
+            "span_pos": [
+                token.pos_
+                for token in span
+            ],
+        })
+
+        result.append(enriched)
+
+    return result
+
+def get_entities_detailed_gliner(text):
+
+    clean_text = preprocess_text(text)
+
+    if not clean_text:
+        return {
+            "PER": [],
+            "ORG": [],
+            "LOC": [],
+            "MISC": [],
+        }
+
+    # spaCy sigue haciendo:
+    # POS, dependencias, lemas y EntityRuler,
+    # pero desactivamos su NER estadístico.
+    with nlp.select_pipes(disable=["ner"]):
+        doc = nlp(clean_text)
+
+    # NER principal
+    gliner_entities = extract_gliner_entities(
+        clean_text
+    )
+
+    # GLiNER + reglas conocidas/estructurales
+    merged = _merge_gliner_with_rules(
+        gliner_entities,
+        doc,
+    )
+
+    # Agregamos features lingüísticos de spaCy
+    merged = _enrich_merged_entities(
+        doc,
+        merged,
+    )
+
+    entities = {
+        "PER": [],
+        "ORG": [],
+        "LOC": [],
+        "MISC": [],
+    }
+
+    seen = {
+        "PER": set(),
+        "ORG": set(),
+        "LOC": set(),
+        "MISC": set(),
+    }
+
+    for entity in merged:
+
+        entity_text = normalize_entity(
+            entity["text"]
+        )
+
+        original_label = entity.get(
+            "label",
+            "MISC",
+        )
+
+        if original_label not in entities:
+            original_label = "MISC"
+
+        if not is_valid_entity(
+            entity_text,
+            original_label,
+        ):
+            continue
+
+        canonical_id = entity.get(
+            "canonical_id"
+        )
+
+        detection_source = entity.get(
+            "detection_source",
+            "ner",
+        )
+
+        # Conservamos tu lógica contextual,
+        # por ejemplo EVO -> Evo Morales.
+        (
+            label,
+            canonical_id,
+            detection_source,
+        ) = _apply_contextual_canonicalization(
+            entity_text=entity_text,
+            label=original_label,
+            canonical_id=canonical_id,
+            detection_source=detection_source,
+            clean_text=clean_text,
+        )
+
+        if label not in entities:
+            label = "MISC"
+
+        key = entity_key(
+            entity_text
+        )
+
+        if key in seen[label]:
+            continue
+
+        seen[label].add(key)
+
+        final_entity = dict(entity)
+
+        final_entity.update({
+            "text": entity_text,
+            "label": label,
+            "canonical_id": canonical_id,
+            "detection_source": detection_source,
+        })
+
+        entities[label].append(
+            final_entity
+        )
+
+    return entities
+
+def get_resolvable_entities_gliner(text):
+
+    detailed = get_entities_detailed_gliner(text)
+
+    return {
+        label: [
+            entity
+            for entity in label_entities
+            if should_resolve_entity(
+                entity,
+                text=text,
+            )
+        ]
+        for label, label_entities
+        in detailed.items()
+    }
+    
+def get_entities_gliner(text):
+
+    detailed = get_entities_detailed_gliner(text)
+
+    return {
+        label: [
+            entity["text"]
+            for entity in label_entities
+        ]
+        for label, label_entities
+        in detailed.items()
+    }
 
 def get_entities_detailed(text):
     clean_text = preprocess_text(text)
