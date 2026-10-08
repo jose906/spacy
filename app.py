@@ -1,7 +1,6 @@
 import mysql.connector
 from entity_resolver import resolve_entity, should_resolve_entity
 import os
-from flask import jsonify 
 from spacyscript import get_entities_detailed_gliner
 
 db_config = {
@@ -51,10 +50,12 @@ def spacy_entities_v2():
 
         if not conexion.is_connected():
 
-            return jsonify({
+            
+
+            return {
                 "status": "error",
                 "error": "No se pudo establecer conexión con MySQL"
-            }), 500
+            }
 
         cursor = conexion.cursor(
             dictionary=True
@@ -119,7 +120,7 @@ def spacy_entities_v2():
                 flush=True
             )
 
-            return jsonify({
+            return {
                 "status": "completed",
                 "tweets_found": 0,
                 "tweets_processed": 0,
@@ -128,7 +129,7 @@ def spacy_entities_v2():
                 "entities_discarded": 0,
                 "errors": 0,
                 "failed_tweets": []
-            }), 200
+            }
 
         print(
             f"📄 Procesando {tweets_found} tweets...",
@@ -635,35 +636,17 @@ def spacy_entities_v2():
 
             status = "error"
 
-        return jsonify({
-            "status": status,
-
-            "model": "gliner",
-
-            "tweets_found": tweets_found,
-
-            "tweets_processed": (
-                tweets_processed
-            ),
-
-            "entities_detected": (
-                entities_detected
-            ),
-
-            "entities_saved": (
-                entities_saved
-            ),
-
-            "entities_discarded": (
-                entities_discarded
-            ),
-
-            "errors": errors,
-
-            "failed_tweets": (
-                failed_tweets
-            )
-        }), 200
+        return {
+    "status": status,
+    "model": "gliner",
+    "tweets_found": tweets_found,
+    "tweets_processed": tweets_processed,
+    "entities_detected": entities_detected,
+    "entities_saved": entities_saved,
+    "entities_discarded": entities_discarded,
+    "errors": errors,
+    "failed_tweets": failed_tweets
+}
 
     except Exception as e:
 
@@ -683,17 +666,12 @@ def spacy_entities_v2():
 
         print(f"❌ Error general en "f"spacy_entities_v2: "f"{type(e).__name__}: {e}",flush=True)
 
-        return jsonify({
-            "status": "error",
-
-            "model": "gliner",
-
-            "error_type": (
-                type(e).__name__
-            ),
-
-            "error": str(e)
-        }), 500
+        return {
+    "status": "error",
+    "model": "gliner",
+    "error_type": type(e).__name__,
+    "error": str(e)
+}
 
     finally:
 
@@ -730,4 +708,5 @@ def spacy_entities_v2():
         print("🔒 Conexión cerrada.",flush=True)
         
 if __name__ == "__main__":
-    spacy_entities_v2()
+    a = spacy_entities_v2()
+    print(a)
