@@ -3,7 +3,7 @@ from entity_resolver import resolve_entity, should_resolve_entity
 import os
 from spacyscript import get_entities_detailed_gliner
 
-"""db_config = {
+db_config = {
             # IP pública o nombre interno de Cloud SQL
     "user": os.environ.get("DB_USER"),
     "password": os.environ.get("DB_PASS"),
@@ -11,7 +11,8 @@ from spacyscript import get_entities_detailed_gliner
     "unix_socket": f"/cloudsql/{os.environ.get('INSTANCE_CONNECTION_NAME')}",
     "charset": "utf8mb4",
     "port": "3306",
-}"""
+}
+"""
 db_config = {
     "host": "34.69.57.221",      # o la IP de tu contenedor / Cloud SQL
     "user": "admin",
@@ -19,7 +20,7 @@ db_config = {
     "database": "Analisis",
     "port": 3306,
    
-}
+}"""
 
 
 
