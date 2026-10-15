@@ -146,7 +146,5 @@ def insert_embeddings():
 
 
 
-if __name__ == "__main__":
-    a = insert_embeddings()
-    print(f"Embeddings creados para {a} tweets")
+
     
