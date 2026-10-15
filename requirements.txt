@@ -7,7 +7,7 @@ spacy==3.8.16
 numpy==1.26.4
 
 gliner==0.2.22
-transformers==4.51.0
+sentence-transformers
 torch==2.2.2
 
 pycountry==26.2.16
