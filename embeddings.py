@@ -2,9 +2,12 @@
 
 import re ,os,json
 import mysql.connector 
+from sentence_transformers import SentenceTransformer
+    
 
 
 model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+model = SentenceTransformer(model_name)
 
 DB_CONFIG = {
             # IP pública o nombre interno de Cloud SQL
@@ -87,8 +90,7 @@ def data_to_insert(embeddings,texts,tweet_ids):
 
 
 def insert_embeddings():
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(model_name)
+   
     
     
     tweets = get_tweets()
