@@ -142,9 +142,19 @@ def health():
 def embeddings_route():
     try:
         count = embeddings.insert_embeddings()
-        return jsonify({"status": "completed", "embeddings_created": count}), 200
+
+        return jsonify({
+            "status": "completed",
+            "embeddings_created": count
+        }), 200
+
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        app.logger.exception("Error generando embeddings")
+
+        return jsonify({
+            "status": "error",
+            "message": "Error interno al generar embeddings"
+        }), 500
 
         
 @app.route("/prueba",methods=["GET"])

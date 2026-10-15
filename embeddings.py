@@ -1,56 +1,112 @@
-# 1. Cargar modelo
+import os
+import re
+import json
+import threading
 
-import re ,os,json
-import mysql.connector 
-from sentence_transformers import SentenceTransformer
-    
+import mysql.connector
 
 
-model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-model = SentenceTransformer(model_name)
+MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
-DB_CONFIG = {
-            # IP pública o nombre interno de Cloud SQL
-    "user": os.environ.get("DB_USER"),
-    "password": os.environ.get("DB_PASS"),
-    "database": os.environ.get("DB_NAME"),
-    "unix_socket": f"/cloudsql/{os.environ.get('INSTANCE_CONNECTION_NAME')}",
-    "charset": "utf8mb4",
-    "port": "3306",
-}
+_model = None
+_model_lock = threading.Lock()
 
-  
-      
-      
+
+# ==========================================
+# 1. CARGA DEL MODELO
+# ==========================================
+
+def get_model():
+    global _model
+
+    if _model is None:
+        with _model_lock:
+            if _model is None:
+                from sentence_transformers import SentenceTransformer
+
+                print("Cargando modelo de embeddings...", flush=True)
+
+                _model = SentenceTransformer(
+                    MODEL_NAME,
+                    device="cpu"
+                )
+
+                print("Modelo cargado correctamente", flush=True)
+
+    return _model
+
+
+# ==========================================
+# 2. CONEXIÓN A MYSQL
+# ==========================================
 
 def get_db_connection():
-    return mysql.connector.connect(**DB_CONFIG)
+    config = {
+        "user": os.environ.get("DB_USER"),
+        "password": os.environ.get("DB_PASS"),
+        "database": os.environ.get("DB_NAME"),
+        "unix_socket": f"/cloudsql/{os.environ.get('INSTANCE_CONNECTION_NAME')}",
+        "charset": "utf8mb4",
+        "connection_timeout": 15,
+    }
+
+    return mysql.connector.connect(**config)
 
 
-  
-
+# ==========================================
+# 3. LIMPIAR TWEET
+# ==========================================
 
 def limpiar_tweet(texto):
+    if texto is None:
+        return ""
+
     texto = str(texto)
-    texto = re.sub(r"http\S+|www\S+", "", texto)
-    texto = re.sub(r"@\w+", "", texto)
+
+    # Eliminar URLs
+    texto = re.sub(
+        r"https?://\S+|www\.\S+",
+        " ",
+        texto,
+        flags=re.IGNORECASE
+    )
+
+    # Eliminar menciones
+    texto = re.sub(r"(?<!\w)@\w+", " ", texto)
+
+    # Eliminar RT al inicio
+    texto = re.sub(
+        r"^\s*RT\s*:?\s*",
+        " ",
+        texto,
+        flags=re.IGNORECASE
+    )
+
+    # Eliminar símbolos decorativos
+    texto = re.sub(
+        r"[★☆◆◉•▪🔴🟡🟠✅✔️✳️🔹🔸▶️🔻🔺]+",
+        " ",
+        texto
+    )
+
+    # Eliminar separadores
+    texto = re.sub(r"\s[-–—]{2,}\s", " ", texto)
+
+    # Normalizar espacios
     texto = re.sub(r"\s+", " ", texto).strip()
-    texto = re.sub(r'[★☆◆◉•▪🔴🟡🟠✅✔️✳️🔹🔸▶️🔻🔺]+', ' ', texto)
-    texto = re.sub(r'\s[-–—]{2,}\s', ' ', texto)
-    text = re.sub(r'(?i)\bRT\b\s*:?', ' ', texto)
-
-    # menciones
-    texto = re.sub(r'(?<!\w)@\w+', ' ', texto)
-
-    # URLs
-    texto = re.sub(r'https?://\S+|www\.\S+', ' ', texto, flags=re.IGNORECASE)
 
     return texto
 
 
+# ==========================================
+# 4. OBTENER TWEETS PENDIENTES
+# ==========================================
+
 def get_tweets():
     sql = """
-        SELECT t.tweetid, t.text
+        SELECT
+            t.tweetid,
+            t.text
         FROM Tweets t
         LEFT JOIN tweet_embeddings e
             ON t.tweetid = e.tweetid
@@ -63,53 +119,82 @@ def get_tweets():
 
     try:
         cur = conn.cursor(dictionary=True)
+
         try:
             cur.execute(sql)
             return cur.fetchall()
         finally:
             cur.close()
+
     finally:
         conn.close()
 
-def data_to_insert(embeddings,texts,tweet_ids):
+
+# ==========================================
+# 5. PREPARAR EMBEDDINGS
+# ==========================================
+
+def data_to_insert(embeddings, texts, tweet_ids):
     data = []
 
-    for tweetid, texto, embedding in zip(tweet_ids, texts, embeddings):
+    for tweetid, texto, embedding in zip(
+        tweet_ids,
+        texts,
+        embeddings
+    ):
         data.append((
             tweetid,
-            model_name,
+            MODEL_NAME,
             len(embedding),
             json.dumps(embedding.tolist()),
             texto
         ))
 
     return data
-    
 
 
-
+# ==========================================
+# 6. GENERAR Y GUARDAR EMBEDDINGS
+# ==========================================
 
 def insert_embeddings():
-   
-    
-    
     tweets = get_tweets()
-    tweet_ids = []
-    texts_texts = []
+
     if not tweets:
-        print("No hay tweets sin embeddings")
+        print("No hay tweets sin embeddings", flush=True)
         return 0
-    else:
-        print(f"Hay {len(tweets)} tweets sin embeddings")
-        for tweet in tweets:
-            tweet_ids.append(tweet["tweetid"])
-            texts_texts.append(limpiar_tweet(tweet["text"]))
-            
-            #embedding = model.encode(texto).tolist()
-        
-        embeddings = model.encode(texts_texts, batch_size=32,show_progress_bar=True,normalize_embeddings=True)
-        data = data_to_insert(embeddings, texts_texts, tweet_ids)
-        query = """
+
+    print(
+        f"Tweets pendientes seleccionados: {len(tweets)}",
+        flush=True
+    )
+
+    tweet_ids = []
+    texts = []
+
+    for tweet in tweets:
+        tweet_ids.append(tweet["tweetid"])
+        texts.append(limpiar_tweet(tweet["text"]))
+
+    # Cargar modelo únicamente cuando se necesite
+    model = get_model()
+
+    print("Generando embeddings...", flush=True)
+
+    embeddings = model.encode(
+        texts,
+        batch_size=16,
+        show_progress_bar=False,
+        normalize_embeddings=True
+    )
+
+    data = data_to_insert(
+        embeddings,
+        texts,
+        tweet_ids
+    )
+
+    query = """
         INSERT INTO tweet_embeddings (
             tweetid,
             model_name,
@@ -124,29 +209,30 @@ def insert_embeddings():
             embedding_dim = VALUES(embedding_dim),
             model_name = VALUES(model_name),
             created_at = CURRENT_TIMESTAMP
-        """
+    """
 
-        conn = get_db_connection()
+    conn = get_db_connection()
+
+    try:
         cur = conn.cursor()
 
         try:
             cur.executemany(query, data)
             conn.commit()
 
-            print(f"Embeddings guardados/actualizados: {cur.rowcount}")
+            print(
+                f"Embeddings guardados: {len(data)}",
+                flush=True
+            )
 
-        except Exception as e:
+        except Exception:
             conn.rollback()
-            print("Error guardando embeddings:", e)
+            raise
 
         finally:
             cur.close()
-            conn.close()
-                
-        print(f"Embeddings creados para {len(tweets)} tweets")
-        return len(tweets)
 
+    finally:
+        conn.close()
 
-
-
-    
+    return len(data)
