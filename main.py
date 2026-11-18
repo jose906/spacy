@@ -27,93 +27,93 @@ db_config = {
 
 @app.route('/spacy', methods=['GET'])
 def spacy():
+    conexion = None
+    cursor = None
     try:
         conexion = mysql.connector.connect(**db_config)
 
-        if conexion.is_connected():
-            print("✅ Conexión exitosa a MySQL", flush=True)
+        if not conexion.is_connected():
+            return jsonify({"status": "error", "message": "MySQL no disponible"}), 503
 
-            cursor = conexion.cursor(dictionary=True)
+        print("✅ Conexión exitosa a MySQL", flush=True)
 
-            # --- 3. Obtener el último tweet YA clasificado ---
-            # Detectamos si alguna columna de entidades tiene contenido
-            last_sql = """
-                SELECT MAX(created) AS last_processed
+        cursor = conexion.cursor(dictionary=True)
+
+        # --- 3. Obtener el último tweet YA clasificado ---
+        # Detectamos si alguna columna de entidades tiene contenido
+        last_sql = """
+            SELECT MAX(created) AS last_processed
+            FROM Tweets
+            WHERE Lugar <> ''
+            OR Persona <> ''
+            OR Organizacion <> ''
+            OR Locacion <> ''
+            OR Otros <> ''
+        """
+        cursor.execute(last_sql)
+        row = cursor.fetchone()
+        last_processed = row["last_processed"]
+
+        if last_processed is None:
+            print("ℹ️ No hay tweets clasificados aún. Se procesará el primer lote.")
+            select_sql = """
+                SELECT tweetid, text
                 FROM Tweets
-                WHERE Lugar <> ''
-                OR Persona <> ''
-                OR Organizacion <> ''
-                OR Locacion <> ''
-                OR Otros <> ''
+                ORDER BY created ASC, tweetid ASC
+                LIMIT 100
             """
-            cursor.execute(last_sql)
-            row = cursor.fetchone()
-            last_processed = row["last_processed"]
+            cursor.execute(select_sql)
+        else:
+            print(f"ℹ️ Último tweet clasificado tiene created = {last_processed}", flush=True)
+            select_sql = """
+                SELECT tweetid, text
+                FROM Tweets
+                WHERE created > %s
+                ORDER BY created ASC, tweetid ASC
+                LIMIT 100
+            """
+            cursor.execute(select_sql, (last_processed,))
 
-            if last_processed is None:
-                print("ℹ️ No hay tweets clasificados aún. Se procesarán TODOS los registros.")
-                select_sql = """
-                    SELECT tweetid, text
-                    FROM Tweets
-                    ORDER BY created ASC
+        tweets = cursor.fetchall()
+
+        if not tweets:
+            print("✅ No hay nuevos tweets para clasificar.")
+        else:
+            print(f"📄 Procesando {len(tweets)} tweets nuevos...")
+
+            for t in tweets:
+                entidades = get_entities(t["text"])
+
+                lugar = ", ".join(entidades["LOC"])
+                persona = ", ".join(entidades["PER"])
+                organizacion = ", ".join(entidades["ORG"])
+                locacion = lugar   # si quieres que locacion = lugar
+                otros = ", ".join(entidades["MISC"])
+
+                update_sql = """
+                    UPDATE Tweets
+                    SET Lugar = %s,
+                        Persona = %s,
+                        Organizacion = %s,
+                        Locacion = %s,
+                        Otros = %s
+                    WHERE tweetid = %s
                 """
-                cursor.execute(select_sql)
-            else:
-                print(f"ℹ️ Último tweet clasificado tiene created = {last_processed}", flush=True)
-                select_sql = """
-                    SELECT tweetid, text
-                    FROM Tweets
-                    WHERE created > %s
-                    ORDER BY created ASC
-                """
-                cursor.execute(select_sql, (last_processed,))
+                cursor.execute(update_sql, (
+                    lugar, persona, organizacion, locacion, otros, t["tweetid"]
+                ))
 
-            tweets = cursor.fetchall()
+            conexion.commit()
+            print("✅ Entidades actualizadas correctamente.",flush=True)
 
-            if not tweets:
-                print("✅ No hay nuevos tweets para clasificar.")
-            else:
-                print(f"📄 Procesando {len(tweets)} tweets nuevos...")
-                a = 0
-
-                for t in tweets:
-                    entidades = get_entities(t["text"])
-
-                    lugar = ", ".join(entidades["LOC"])
-                    persona = ", ".join(entidades["PER"])
-                    organizacion = ", ".join(entidades["ORG"])
-                    locacion = lugar   # si quieres que locacion = lugar
-                    otros = ", ".join(entidades["MISC"])
-
-                    update_sql = """
-                        UPDATE Tweets
-                        SET Lugar = %s,
-                            Persona = %s,
-                            Organizacion = %s,
-                            Locacion = %s,
-                            Otros = %s
-                        WHERE tweetid = %s
-                    """
-                    cursor.execute(update_sql, (
-                        lugar, persona, organizacion, locacion, otros, t["tweetid"]
-                    ))
-                    a += 1
-                    if a % 100 == 0:
-                        print(f"✅ Procesados {a} tweets...")
-                        break
-                    
-
-                conexion.commit()
-                print("✅ Entidades actualizadas correctamente.",flush=True)
-
-    except Error as e:
-        print(f"❌ Error en la conexión o actualización: {e}")
-
+    except Error:
+        app.logger.exception("Error en la conexión o actualización de entidades")
+        return jsonify({"status": "error", "message": "Error interno al actualizar entidades"}), 500
     finally:
-        if 'conexion' in locals() and conexion.is_connected():
+        if cursor is not None:
             cursor.close()
+        if conexion is not None:
             conexion.close()
-            print("🔒 Conexión cerrada.")
     return jsonify({"status": "completed"}), 200
 
 def get_db_connection():

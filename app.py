@@ -12,17 +12,6 @@ db_config = {
     "charset": "utf8mb4",
     "port": "3306",
 }
-"""
-db_config = {
-    "host": "34.69.57.221",      # o la IP de tu contenedor / Cloud SQL
-    "user": "admin",
-    "password": "Admin123!",
-    "database": "Analisis",
-    "port": 3306,
-   
-}"""
-
-
 
 def spacy_entities_v2():
 

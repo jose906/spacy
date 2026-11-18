@@ -1,31 +1,28 @@
+import os
+
 import stance
 
 
-
 def ejecutar_stance_topics_handler():
-    # Primero calcula los targets de topicos que aún no los tengan.
-    # Después clasifica comentarios pendientes por topico, sin filtro de fecha.
     def tarea():
         targets = stance.ejecutar_targets_topicos(
-            limit=2,
-            tweets_por_topico=20
+            limit=int(os.getenv("STANCE_MAX_TARGETS", "2")),
+            tweets_por_topico=int(os.getenv("STANCE_TWEETS_POR_TOPICO", "20")),
         )
-
         comentarios = stance.ejecutar_stance_por_topico(
-            max_comentarios=10,
-            tamano_lote=10,
-            max_topicos=2,
-            max_publicaciones=3
+            max_comentarios=int(os.getenv("STANCE_MAX_COMENTARIOS", "10")),
+            tamano_lote=int(os.getenv("STANCE_TAMANO_LOTE", "10")),
+            max_topicos=int(os.getenv("STANCE_MAX_TOPICOS", "2")),
+            max_publicaciones=int(os.getenv("STANCE_MAX_PUBLICACIONES", "3")),
         )
+        return {
+            "targets": targets,
+            "comentarios": comentarios,
+            "fallidos": targets["fallidos"] + comentarios["fallidos"],
+        }
 
-        print(f"Se han procesado {len(targets)} targets y {len(comentarios)} comentarios.")
+    return stance.ejecutar_job_stance("netvora_stance_topics", tarea)
 
-    return stance.ejecutar_job_stance(
-        "netvora_stance_topics",
-        tarea
-    )
-    
-    
+
 if __name__ == "__main__":
-    a = ejecutar_stance_topics_handler()
-    print(f"Se han procesado {a} comentarios y targets de topicos.")
+    ejecutar_stance_topics_handler()

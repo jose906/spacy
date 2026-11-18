@@ -1,10 +1,9 @@
-
-
 import json
-
 import os
-
 from collections import defaultdict
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import lru_cache
 
 import mysql.connector
 import requests
@@ -31,6 +30,8 @@ if INSTANCE:
 elif DB_HOST:
     DB_CONFIG["host"] = DB_HOST
 
+_JOB_CONNECTION = ContextVar("stance_job_connection", default=None)
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 
@@ -45,6 +46,9 @@ VALIDOS = {
 
 
 def get_db_connection():
+    faltantes = [nombre for nombre in ("DB_USER", "DB_PASS", "DB_NAME") if not os.getenv(nombre)]
+    if faltantes:
+        raise RuntimeError(f"Falta configurar: {', '.join(faltantes)}")
     if not (INSTANCE or DB_HOST):
         raise RuntimeError(
             "Falta INSTANCE_CONNECTION_NAME o DB_HOST"
@@ -52,57 +56,54 @@ def get_db_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
 
-def consultar_uno(sql, params=()):
+@contextmanager
+def conexion_stance():
+    conn = _JOB_CONNECTION.get()
+    if conn is not None:
+        yield conn
+        return
+
     conn = get_db_connection()
     try:
-        cur = conn.cursor(dictionary=True)
-        try:
-            cur.execute(sql, params)
-            return cur.fetchone()
-        finally:
-            cur.close()
+        yield conn
     finally:
         conn.close()
+
+
+def consultar_uno(sql, params=()):
+    with conexion_stance() as conn, conn.cursor(dictionary=True, buffered=True) as cur:
+        cur.execute(sql, params)
+        fila = cur.fetchone()
+        conn.commit()
+        return fila
 
 
 def consultar_todos(sql, params=()):
-    conn = get_db_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
-        try:
-            cur.execute(sql, params)
-            return cur.fetchall()
-        finally:
-            cur.close()
-    finally:
-        conn.close()
+    with conexion_stance() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute(sql, params)
+        filas = cur.fetchall()
+        conn.commit()
+        return filas
 
 
 def ejecutar_sql(sql, params, muchos=False):
-    conn = get_db_connection()
-
-    try:
-        cur = conn.cursor()
+    with conexion_stance() as conn, conn.cursor() as cur:
         try:
             if muchos:
                 cur.executemany(sql, params)
             else:
                 cur.execute(sql, params)
-
-            total = cur.rowcount
-            ultimo_id = cur.lastrowid
-
+            total, ultimo_id = cur.rowcount, cur.lastrowid
             conn.commit()
             return total, ultimo_id
-        finally:
-            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
 
-    except Exception:
-        conn.rollback()
-        raise
 
-    finally:
-        conn.close()
+@lru_cache(maxsize=1)
+def sesion_gemini():
+    return requests.Session()
 
 
 # ============================================================
@@ -126,7 +127,7 @@ def llamar_gemini(prompt):
             "thinkingLevel": "low"
         }
 
-    respuesta = requests.post(
+    respuesta = sesion_gemini().post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
         headers={
             "x-goog-api-key": GEMINI_API_KEY
@@ -144,19 +145,12 @@ def llamar_gemini(prompt):
         timeout=90
     )
 
-    if not respuesta.ok:
-        print(
-            f"Error Gemini HTTP {respuesta.status_code}: {respuesta.text[:1000]}"
-        )
-        respuesta.raise_for_status()
+    respuesta.raise_for_status()
 
     data = respuesta.json()
     candidatos = data.get("candidates") or []
-
     if not candidatos:
-        raise ValueError(
-            f"Gemini no devolvio candidatos: {str(data)[:500]}"
-        )
+        raise ValueError("Gemini no devolvió candidatos")
 
     partes = candidatos[0].get(
         "content", {}
@@ -201,8 +195,10 @@ def validar_target(resultado):
 
     if tipo == "STANCE":
         if (
-            not resultado.get("main_target")
-            or not resultado.get("target_description")
+            any(
+                not isinstance(resultado.get(campo), str) or not resultado[campo].strip()
+                for campo in ("main_target", "target_description")
+            )
         ):
             raise ValueError(
                 "Target STANCE incompleto"
@@ -423,7 +419,8 @@ def validar_resultados_stance(
 
         if (
             rid not in esperados
-            or item.get("stance") not in VALIDOS
+            or not isinstance(item.get("stance"), str)
+            or item["stance"] not in VALIDOS
         ):
             continue
 
@@ -463,7 +460,11 @@ def get_siguiente_publicacion_target(
     return consultar_uno("""
         SELECT
             t.tweetid,
-            t.text
+            t.text,
+            pt.id AS post_target_id,
+            pt.target_type,
+            pt.main_target,
+            pt.target_description
         FROM Tweets t
 
         LEFT JOIN post_targets pt
@@ -474,6 +475,8 @@ def get_siguiente_publicacion_target(
             OR t.tweetid < %s
         )
 
+        AND t.text IS NOT NULL
+        AND t.text <> ''
         AND (
             (
                 pt.id IS NULL
@@ -658,92 +661,73 @@ def ejecutar_stance_por_target(
 
         resumen["publicaciones"] += 1
 
-        try:
-            target = get_post_target(tweetid)
+        target = {**publicacion, "id": publicacion["post_target_id"]}
 
-            if target is None:
-                guardar_post_target(
-                    tweetid,
-                    analizar_target_publicacion(
-                        publicacion["text"]
-                    )
+        if target["id"] is None:
+            guardar_post_target(
+                tweetid,
+                analizar_target_publicacion(
+                    publicacion["text"]
                 )
-
-                target = get_post_target(tweetid)
-
-            if (
-                not target
-                or target["target_type"] != "STANCE"
-            ):
-                continue
-
-            while (
-                resumen["intentados"] < max_comentarios
-            ):
-                n = min(
-                    tamano_lote,
-                    max_comentarios
-                    - resumen["intentados"]
-                )
-
-                comentarios = (
-                    get_comentarios_target_pendientes(
-                        tweetid,
-                        target["id"],
-                        n
-                    )
-                )
-
-                if not comentarios:
-                    break
-
-                resumen["intentados"] += len(
-                    comentarios
-                )
-
-                try:
-                    validos = clasificar_stance_target(
-                        publicacion["text"],
-                        target,
-                        comentarios
-                    )
-
-                    guardados = guardar_stance_target(
-                        target["id"],
-                        validos
-                    )
-
-                    resumen["guardados"] += guardados
-
-                    resumen["fallidos"] += (
-                        len(comentarios) - guardados
-                    )
-
-                    print(
-                        f"Tweet {tweetid}: "
-                        f"enviados={len(comentarios)} "
-                        f"guardados={guardados}"
-                    )
-
-                    if guardados < len(comentarios):
-                        break
-
-                except Exception:
-                    resumen["fallidos"] += len(
-                        comentarios
-                    )
-
-                    print( f"Error clasificando comentarios del tweet {tweetid}")
-                    break
-
-        except Exception:
-            resumen["fallidos"] += 1
-
-            print(
-                f"Error analizando target del tweet {tweetid}",
-               
             )
 
+            target = get_post_target(tweetid)
+
+        if (
+            not target
+            or target["target_type"] != "STANCE"
+        ):
+            continue
+
+        while (
+            resumen["intentados"] < max_comentarios
+        ):
+            n = min(
+                tamano_lote,
+                max_comentarios
+                - resumen["intentados"]
+            )
+
+            comentarios = (
+                get_comentarios_target_pendientes(
+                    tweetid,
+                    target["id"],
+                    n
+                )
+            )
+
+            if not comentarios:
+                break
+
+            resumen["intentados"] += len(
+                comentarios
+            )
+
+            validos = clasificar_stance_target(
+                publicacion["text"],
+                target,
+                comentarios
+            )
+
+            guardados = guardar_stance_target(
+                target["id"],
+                validos
+            )
+
+            resumen["guardados"] += guardados
+
+            resumen["fallidos"] += (
+                len(comentarios) - len(validos)
+            )
+
+            print(
+                f"Tweet {tweetid}: "
+                f"enviados={len(comentarios)} "
+                f"guardados={guardados}"
+            )
+
+            if len(validos) < len(comentarios) or len(comentarios) < n:
+                break
     return resumen
 
 
@@ -762,6 +746,14 @@ def get_topics_pending(
             topic_name
         FROM topics
         WHERE target_type IS NULL
+          AND EXISTS (
+              SELECT 1
+              FROM topic_tweets tt
+              JOIN Tweets t ON t.tweetid = tt.tweetid
+              WHERE tt.topic_id = topics.topic_id
+                AND t.text IS NOT NULL
+                AND t.text <> ''
+          )
 
         ORDER BY last_seen DESC, topic_id DESC
         LIMIT %s
@@ -803,7 +795,7 @@ def update_topic_target(
             main_target = %s,
             target_description = %s,
             target_confidence = %s
-        WHERE topic_id = %s
+        WHERE topic_id = %s AND target_type IS NULL
     """, (
         resultado["target_type"],
         resultado.get("main_target"),
@@ -818,6 +810,9 @@ def ejecutar_targets_topicos(
     tweets_por_topico=20,
     desde=None
 ):
+    if min(limit, tweets_por_topico) <= 0:
+        raise ValueError("Los límites deben ser positivos")
+
     resumen = {
         "procesados": 0,
         "stance": 0,
@@ -827,55 +822,47 @@ def ejecutar_targets_topicos(
     }
 
     for topico in get_topics_pending(limit):
-        try:
-            tweets = get_tweets_topic(
-                topico["topic_id"],
-                tweets_por_topico
-            )
+        tweets = get_tweets_topic(
+            topico["topic_id"],
+            tweets_por_topico
+        )
 
-            if not tweets:
-                print(
-                    f"Topico {topico['topic_id']} sin tweets"
-                )
-
-                resumen["fallidos"] += 1
-                continue
-
-            target = analizar_target_topic(
-                topico["topic_name"],
-                [
-                    t["text"]
-                    for t in tweets
-                ]
-            )
-
-            update_topic_target(
-                topico["topic_id"],
-                target
-            )
-
-            resumen["procesados"] += 1
-
-            nombre = target["target_type"]
-
-            clave = {
-                "STANCE": "stance",
-                "INFORMATIVO": "informativos",
-                "MIXTO": "mixtos"
-            }[nombre]
-
-            resumen[clave] += 1
-
+        if not tweets:
             print(
-                f"Topico {topico['topic_id']}: {nombre}"
+                f"Topico {topico['topic_id']} sin tweets"
             )
 
-        except Exception:
             resumen["fallidos"] += 1
+            continue
 
-            print(
-                f"Error analizando target de topico {topico['topic_id']}"
-            )
+        target = analizar_target_topic(
+            topico["topic_name"],
+            [
+                t["text"]
+                for t in tweets
+            ]
+        )
+
+        update_topic_target(
+            topico["topic_id"],
+            target
+        )
+
+        resumen["procesados"] += 1
+
+        nombre = target["target_type"]
+
+        clave = {
+            "STANCE": "stance",
+            "INFORMATIVO": "informativos",
+            "MIXTO": "mixtos"
+        }[nombre]
+
+        resumen[clave] += 1
+
+        print(
+            f"Topico {topico['topic_id']}: {nombre}"
+        )
 
     return resumen
 
@@ -1067,37 +1054,27 @@ def ejecutar_stance_por_topico(
             resumen["publicaciones"] += 1
             resumen["intentados"] += len(lote)
 
-            try:
-                validos = clasificar_stance_target(
-                    lote[0]["publicacion_original"],
-                    topico,
-                    lote
-                )
+            validos = clasificar_stance_target(
+                lote[0]["publicacion_original"],
+                topico,
+                lote
+            )
 
-                guardados = guardar_stance_topico(
-                    topico["topic_id"],
-                    validos
-                )
+            guardados = guardar_stance_topico(
+                topico["topic_id"],
+                validos
+            )
 
-                resumen["guardados"] += guardados
+            resumen["guardados"] += guardados
 
-                resumen["fallidos"] += (
-                    len(lote) - guardados
-                )
+            resumen["fallidos"] += (
+                len(lote) - len(validos)
+            )
 
-                print(
-                    f"Topico {topico['topic_id']}: "
-                    f"enviados={len(lote)} "
-                    f"guardados={guardados}" )
-
-            except Exception:
-                resumen["fallidos"] += len(lote)
-
-                print(
-                    f"Error clasificando comentarios del topico {topico['topic_id']}",
-                    
-                )
-
+            print(
+                f"Topico {topico['topic_id']}: "
+                f"enviados={len(lote)} "
+                f"guardados={guardados}" )
     return resumen
 
 
@@ -1106,72 +1083,28 @@ def ejecutar_stance_por_topico(
 # INDEPENDIENTE DE FLASK Y main.py
 # ============================================================
 
-def ejecutar_job_stance(
-    lock_name,
-    tarea
-):
-    conn = get_db_connection()
-    cur = None
-    adquirido = False
+def ejecutar_job_stance(lock_name, tarea):
+    if not GEMINI_API_KEY:
+        raise RuntimeError("Falta GEMINI_API_KEY")
 
-    try:
-        cur = conn.cursor()
+    with conexion_stance() as conn, conn.cursor() as cur:
+        cur.execute("SELECT GET_LOCK(%s, 0)", (lock_name,))
+        estado, = cur.fetchone()
+        if estado == 0:
+            print(json.dumps({"job": lock_name, "estado": "omitido_por_concurrencia"}))
+            return None
+        if estado != 1:
+            raise RuntimeError(f"No se pudo adquirir el lock {lock_name}")
 
-        cur.execute(
-            "SELECT GET_LOCK(%s, 0)",
-            (lock_name,)
-        )
-
-        fila = cur.fetchone()
-
-        adquirido = bool(
-            fila and fila[0] == 1
-        )
-
-        if not adquirido:
-            raise RuntimeError(
-                f"El proceso {lock_name} ya esta en ejecucion"
-            )
-
-        print(f"Iniciando {lock_name}...")
-
-        resultado = tarea()
-
-        print(
-            f"Finalizado {lock_name}: {json.dumps(resultado, ensure_ascii=False)}"
-        )
-
-        return resultado
-
-    finally:
-        if cur is not None:
-            if adquirido:
-                try:
-                    cur.execute(
-                        "SELECT RELEASE_LOCK(%s)",
-                        (lock_name,)
-                    )
-                    cur.fetchone()
-
-                except Exception:
-                    print(
-                        "No se pudo liberar el lock",
-                       
-                    )
-
-            try:
-                cur.close()
-            except Exception:
-                print(
-                    "No se pudo cerrar el cursor",
-                   
-                )
-
-        conn.close()
-        
-
-
-
-
-
-    
+        token = _JOB_CONNECTION.set(conn)
+        try:
+            print(f"Iniciando {lock_name}")
+            resultado = tarea()
+            print(json.dumps({"job": lock_name, "resultado": resultado}, ensure_ascii=False))
+            fallidos = resultado["fallidos"]
+            if fallidos:
+                raise RuntimeError(f"{lock_name}: {fallidos} registros pendientes tras el procesamiento")
+            return resultado
+        finally:
+            _JOB_CONNECTION.reset(token)
+            # Al cerrar la conexión se libera el lock, incluso si la tarea falla.
